@@ -4,7 +4,7 @@
 >
 > **Companion file:** `AI Agent Coding Guide.md` (immutable spec — never modify)
 >
-> **Last updated:** —
+| **Last updated:** | March 4, 2026 |
 
 ---
 
@@ -13,9 +13,9 @@
 | Metric | Value |
 |:---|:---|
 | **Current Sprint** | Sprint 1 |
-| **Current Step** | STEP 01 |
-| **Steps Completed** | 0 / 84 |
-| **Overall Progress** | 0% |
+| **Current Step** | STEP 02 |
+| **Steps Completed** | 1 / 84 |
+| **Overall Progress** | 1% |
 | **Blockers** | None |
 
 ---
@@ -33,7 +33,7 @@ Status legend:
 
 | Step | Status | Description | Guide Section |
 |:---|:---|:---|:---|
-| STEP 01 | [ ] | Initialize Git repo with the full folder structure | B |
+| STEP 01 | [x] | Initialize Git repo with the full folder structure | B |
 | STEP 02 | [ ] | Create `docker-compose.yml`, run `docker-compose up -d`, verify | O.1 |
 | STEP 03 | [ ] | Build `libs/sports_common` package (config, logging, constants, schemas, utils) | B, A, D |
 | STEP 04 | [ ] | Create Alembic config, write ALL migrations, run `alembic upgrade head` | D |
@@ -202,3 +202,33 @@ Status legend:
 ---
 
 *(No sessions recorded yet — the first agent session will begin below this line.)*
+
+#### Session 1 — March 4, 2026
+
+**Steps completed this session:** STEP 01
+**Duration context:** medium session
+
+**Work done:**
+- Created full folder structure per Section B of the guide
+- Created pyproject.toml (root workspace)
+- Created libs/pyproject.toml for sports_common package
+- Created libs/sports_common/config.py (Pydantic BaseSettings)
+- Created libs/sports_common/logging.py (structlog setup)
+- Created libs/sports_common/constants.py (enums, constants)
+- Created libs/sports_common/schemas/ (events, odds, biometrics, sentiment, predictions, features)
+- Created libs/sports_common/utils/ (time, math, data_guard)
+- Created libs/sports_common/db.py (async SQLAlchemy client)
+- Created libs/sports_common/kafka_client.py (producer/consumer wrappers)
+- Created .gitignore and .env.example
+- Created docker-compose.yml with Kafka, Postgres, Redis, MLflow
+
+**Decisions made:**
+- Used async SQLAlchemy for database operations per Section A requirements
+- Used structlog for structured logging per RULE-11
+- Created comprehensive Pydantic schemas for all data types
+
+**Issues encountered:**
+- LSP errors expected since dependencies not installed yet (kafka-python, sqlalchemy, pydantic, structlog)
+- Docker not available in current environment - docker-compose up -d needs to be run manually
+
+**NEXT:** Run `docker-compose up -d` and verify services start correctly (STEP 02)

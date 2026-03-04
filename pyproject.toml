@@ -1,0 +1,17 @@
+name = "sports-prediction-system"
+version = "0.1.0"
+description = "A professional-grade sports prediction platform"
+readme = "README.md"
+requires-python = ">=3.11"
+edition = "2024"
+
+[tool.uv]
+dev-dependencies = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
