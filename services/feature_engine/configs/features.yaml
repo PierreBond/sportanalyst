@@ -1,0 +1,187 @@
+# Feature Engineering Pipeline Configuration
+# Defines all features used for match outcome prediction
+
+features:
+  # === Temporal Features ===
+  - name: rolling_avg_goals_5
+    description: "Mean goals scored over last 5 home/away matches"
+    window: 5
+    aggregation: mean
+    column: goals_scored
+    group_by: [team_id, venue_type]
+    type: float
+    training_eligible: true
+
+  - name: rolling_avg_goals_10
+    description: "Mean goals scored over last 10 matches"
+    window: 10
+    aggregation: mean
+    column: goals_scored
+    group_by: [team_id]
+    type: float
+    training_eligible: true
+
+  - name: rolling_std_goals_5
+    description: "Std dev of goals scored over last 5 matches"
+    window: 5
+    aggregation: std
+    column: goals_scored
+    group_by: [team_id]
+    type: float
+    training_eligible: true
+
+  - name: rolling_avg_xg_5
+    description: "Mean expected goals (xG) over last 5 matches"
+    window: 5
+    aggregation: mean
+    column: xg
+    group_by: [team_id]
+    type: float
+    training_eligible: true
+
+  - name: rolling_avg_shots_on_target_5
+    description: "Mean shots on target over last 5 matches"
+    window: 5
+    aggregation: mean
+    column: shots_on_target
+    group_by: [team_id]
+    type: float
+    training_eligible: true
+
+  - name: momentum_xg_slope_5
+    description: "Linear regression slope of xG over last 5 matches"
+    window: 5
+    aggregation: linreg_slope
+    column: xg
+    group_by: [team_id]
+    type: float
+    training_eligible: true
+
+  - name: momentum_xg_slope_12
+    description: "Linear regression slope of xG over last 12 matches"
+    window: 12
+    aggregation: linreg_slope
+    column: xg
+    group_by: [team_id]
+    type: float
+    training_eligible: true
+
+  - name: lag_1_goals
+    description: "Goals scored in the previous match"
+    lag: 1
+    column: goals_scored
+    group_by: [team_id]
+    type: float
+    training_eligible: true
+
+  - name: lag_2_goals
+    description: "Goals scored two matches ago"
+    lag: 2
+    column: goals_scored
+    group_by: [team_id]
+    type: float
+    training_eligible: true
+
+  - name: lag_3_goals
+    description: "Goals scored three matches ago"
+    lag: 3
+    column: goals_scored
+    group_by: [team_id]
+    type: float
+    training_eligible: true
+
+  # === Schedule & Context Features ===
+  - name: rest_days
+    description: "Days since team's last match"
+    type: int
+    compute: date_diff
+    training_eligible: true
+
+  - name: travel_distance_km
+    description: "Approximate travel distance from last venue to current venue"
+    type: float
+    training_eligible: true
+
+  - name: is_home
+    description: "1 if team is home, 0 if away"
+    type: int
+    training_eligible: true
+
+  - name: day_of_week
+    description: "Day of week (0=Monday, 6=Sunday)"
+    type: int
+    training_eligible: true
+
+  # === Market / Odds Features ===
+  - name: opening_implied_prob_home
+    description: "Implied probability of home win from the opening moneyline"
+    type: float
+    training_eligible: true
+
+  - name: closing_implied_prob_home
+    description: "Implied probability of home win from the closing moneyline (ONLY for evaluation, NOT training)"
+    type: float
+    training_eligible: false
+
+  - name: line_movement_spread
+    description: "Change in spread from open to latest snapshot"
+    type: float
+    training_eligible: true
+
+  - name: cash_ticket_divergence
+    description: "cash_pct_home - ticket_pct_home (positive = sharp on home)"
+    type: float
+    training_eligible: true
+
+  - name: reverse_line_movement
+    description: "Boolean flag: line moved opposite to ticket majority"
+    type: int
+    training_eligible: true
+
+  # === Biometric Features ===
+  - name: team_avg_acwr
+    description: "Mean ACWR of starting lineup"
+    type: float
+    training_eligible: true
+
+  - name: star_player_acwr
+    description: "ACWR of the team's highest-rated player"
+    type: float
+    training_eligible: true
+
+  - name: team_avg_hrv
+    description: "Mean HRV of starting lineup (most recent reading)"
+    type: float
+    training_eligible: true
+
+  - name: team_injury_risk_score
+    description: "Aggregated injury risk probability across starters"
+    type: float
+    training_eligible: true
+
+  # === Sentiment Features ===
+  - name: team_sentiment_twitter_24h
+    description: "Avg sentiment score from Twitter mentions in last 24 hours"
+    type: float
+    training_eligible: true
+
+  - name: team_sentiment_reddit_24h
+    description: "Avg sentiment score from Reddit posts in last 24 hours"
+    type: float
+    training_eligible: true
+
+  - name: team_sentiment_news_24h
+    description: "Avg sentiment score from news articles in last 24 hours"
+    type: float
+    training_eligible: true
+
+  - name: sentiment_volume_24h
+    description: "Total number of sentiment-analyzed texts in last 24 hours"
+    type: int
+    training_eligible: true
+
+# Feature Store Configuration
+feature_store:
+  version: "v1.0"
+  backend: "postgres"
+  ttl_seconds: 3600
