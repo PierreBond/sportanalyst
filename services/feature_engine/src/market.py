@@ -51,7 +51,7 @@ def calculate_vigorish(
     draw_odds: float | None = None,
 ) -> float:
     """Calculate the vigorish (juice) from odds."""
-    implied_probs = calculate_implied_probabilities(home_odds, away__draw=draw_odds)
+    implied_probs = calculate_implied_probabilities(home_odds, away_odds, draw_odds)
     total_implied = sum(p for p in implied_probs if p is not None)
     return max(0, (total_implied - 1.0) / total_implied)
 

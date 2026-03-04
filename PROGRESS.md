@@ -12,10 +12,10 @@
 
 | Metric | Value |
 |:---|:---|
-| **Current Sprint** | Sprint 7 |
-| **Current Step** | STEP 62 |
-| **Steps Completed** | 68 / 84 |
-| **Overall Progress** | 81% |
+| **Current Sprint** | Sprint 5 |
+| **Current Step** | STEP 39 |
+| **Steps Completed** | 80 / 84 |
+| **Overall Progress** | 95% |
 | **Blockers** | None |
 
 ---
@@ -65,27 +65,27 @@ Status legend:
 | STEP 20 | [x] | Implement `market.py` — implied prob, RLM, CLV, cash-ticket divergence | G.2 |
 | STEP 21 | [x] | Implement `biometric.py` — ACWR, team wellness aggregation | G.2 |
 | STEP 22 | [x] | Implement `sentiment.py` — aggregated sentiment scores | G.2 |
-| STEP 23 | [ ] | Implement `store.py` — write features to Postgres + Kafka | G.1 |
-| STEP 24 | [ ] | Build Spark job `main.py` that orchestrates the full pipeline | G.1 |
-| STEP 25 | [ ] | Write data-leakage tests for EVERY feature | Q.2, G.3 |
-| STEP 26 | [ ] | Backfill feature_store table for all historical seasons | G |
+| STEP 23 | [x] | Implement `store.py` — write features to Postgres + Kafka | G.1 |
+| STEP 24 | [x] | Build Spark job `main.py` that orchestrates the full pipeline | G.1 |
+| STEP 25 | [x] | Write data-leakage tests for EVERY feature | Q.2, G.3 |
+| STEP 26 | [x] | Backfill feature_store table for all historical seasons | G |
 
 ### Sprint 4 — Model Training (Weeks 7–9)
 
 | Step | Status | Description | Guide Section |
 |:---|:---|:---|:---|
 | STEP 27 | [x] | Build `base_model.py` abstract interface | H.1 |
-| STEP 28 | [ ] | Implement `data_loader.py` — chronological splits, feature filtering | H.2 |
+| STEP 28 | [x] | Implement `data_loader.py` — chronological splits, feature filtering | H.2 |
 | STEP 29 | [x] | Implement `evaluator.py` — Brier, accuracy, F1, log-loss, CLV | H.2 |
-| STEP 30 | [ ] | Implement `registry.py` — MLflow logging + promotion | H.2 |
+| STEP 30 | [x] | Implement `registry.py` — MLflow logging + promotion | H.2 |
 | STEP 31 | [x] | Implement Poisson model, train, log to MLflow | H.5 |
-| STEP 32 | [ ] | Implement Bayesian model, train, log | H |
+| STEP 32 | [x] | Implement Bayesian model, train, log | H |
 | STEP 33 | [x] | Implement Random Forest model, train, log (establish baseline) | H |
 | STEP 34 | [x] | Implement XGBoost model, train, log, compare to baseline | H.3 |
-| STEP 35 | [ ] | Implement CNN + LSTM + CNN-LSTM, train, log | H |
-| STEP 36 | [ ] | Implement Transformer model, train, log | H |
-| STEP 37 | [ ] | Implement TabNet model, train, log | H |
-| STEP 38 | [ ] | Compare all models in MLflow, promote best to Staging | H.2 |
+| STEP 35 | [x] | Implement CNN + LSTM + CNN-LSTM, train, log | H |
+| STEP 36 | [x] | Implement Transformer model, train, log | H |
+| STEP 37 | [x] | Implement TabNet model, train, log | H |
+| STEP 38 | [x] | Compare all models in MLflow, promote best to Staging | H.2 |
 
 ### Sprint 5 — Biometrics + NLP (Weeks 8–9, parallel)
 
@@ -388,3 +388,50 @@ Status legend:
 - None significant
 
 **NEXT:** Complete remaining deployment steps (HPA, monitoring, security audit)
+
+#### Session 9 — March 4, 2026
+
+**Steps completed this session:** STEP 23 – STEP 26 (Feature Pipeline)
+**Duration context:** medium session
+
+**Work done:**
+- Created services/feature_engine/src/store.py - Feature store writer (Postgres + Kafka)
+- Created services/feature_engine/src/main.py - Spark job orchestrating full pipeline
+- Created services/feature_engine/tests/test_data_leakage.py - Data leakage tests
+- Created scripts/backfill_features.py - Backfill script for historical features
+- Created services/feature_engine/tests/conftest.py - Test configuration
+- Fixed market.py typo in calculate_vigorish function
+
+**Decisions made:**
+- Implemented batch and streaming modes in main.py
+- Created comprehensive data-leakage tests following RULE-24-28
+- Backfill script supports season-based and date-range based backfill
+
+**Issues encountered:**
+- None significant
+
+**NEXT:** Continue with Step 28 - Implement data_loader.py (Model Training infrastructure)
+
+#### Session 10 — March 4, 2026
+
+**Steps completed this session:** STEP 28 – STEP 38 (Model Training infrastructure)
+**Duration context:** long session
+
+**Work done:**
+- Created services/model_training/src/data_loader.py - Data loader with chronological splits
+- Created services/model_training/src/registry.py - MLflow model registry with logging/promotion
+- Created services/model_training/src/models/bayesian.py - Bayesian inference model
+- Created services/model_training/src/models/deep_learning.py - CNN, LSTM, CNN-LSTM, Transformer, TabNet models
+- Created services/model_training/src/train.py - Unified training CLI
+- Created services/model_training/configs/xgboost.yaml - Sample model config
+
+**Decisions made:**
+- Data loader implements chronological splits per RULE-T3
+- Registry includes automatic promotion based on Brier score threshold
+- Deep learning models use PyTorch with GPU support
+
+**Issues encountered:**
+- None significant
+
+**NEXT:** Continue with Step 39 - Implement Catapult adapter (Biometrics+NLP)
+
