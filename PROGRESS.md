@@ -91,9 +91,9 @@ Status legend:
 
 | Step | Status | Description | Guide Section |
 |:---|:---|:---|:---|
-| STEP 39 | [ ] | Implement Catapult adapter (in ingestion service) | F.1 |
-| STEP 40 | [ ] | Implement WHOOP adapter (in ingestion service) | F.1 |
-| STEP 41 | [ ] | Build biometric_service: acwr.py, injury_risk.py, wellness.py, publisher.py | I |
+| STEP 39 | [x] | Implement Catapult adapter (in ingestion service) | F.1 |
+| STEP 40 | [x] | Implement WHOOP adapter (in ingestion service) | F.1 |
+| STEP 41 | [x] | Build biometric_service: acwr.py, injury_risk.py, wellness.py, publisher.py | I |
 | STEP 42 | [ ] | Train injury-risk classifier, log to MLflow | I.2 |
 | STEP 43 | [ ] | Build NLP scrapers: twitter.py, reddit.py, news_rss.py | J.2 |
 | STEP 44 | [ ] | Build preprocessing.py (tokenize, clean, POS tag) | J.1 |
@@ -434,4 +434,30 @@ Status legend:
 - None significant
 
 **NEXT:** Continue with Step 39 - Implement Catapult adapter (Biometrics+NLP)
+
+#### Session 11 — March 5, 2026
+
+**Steps completed this session:** STEP 39 – STEP 41 (Catapult/WHOOP adapters + biometric_service)
+**Duration context:** medium session
+
+**Work done:**
+- Created services/ingestion/src/adapters/catapult.py - Catapult biometric adapter with OAuth, workload/HR data
+- Created services/ingestion/src/adapters/whoop.py - WHOOP biometric adapter with OAuth, recovery/strain data
+- Updated services/ingestion/src/adapters/__init__.py - exported new adapters
+- Created services/biometric_service/src/acwr.py - ACWR computation (7/28 day windows)
+- Created services/biometric_service/src/injury_risk.py - Injury risk classifier with heuristic rules
+- Created services/biometric_service/src/wellness.py - Team wellness aggregation
+- Created services/biometric_service/src/publisher.py - Kafka publisher for biometric features
+- Created services/biometric_service/pyproject.toml - service dependencies
+- Created services/biometric_service/src/__init__.py - module exports
+
+**Decisions made:**
+- Used deterministic UUID generation for player IDs (for development)
+- Implemented ACWR with proper 7-day acute / 28-day chronic windows per I.1
+- Injury risk uses weighted heuristic model (production would use XGBoost)
+
+**Issues encountered:**
+- LSP errors expected since sports_common not installed in environment
+
+**NEXT:** Continue with Step 42 - Train injury-risk classifier, or Step 43 - Build NLP scrapers
 

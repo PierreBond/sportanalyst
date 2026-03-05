@@ -84,7 +84,7 @@ class KafkaClient:
             "message_sent",
             topic=topic,
             key=key,
-            partition=future.partiton,
+            partition=future.partition,
             offset=future.offset,
         )
 

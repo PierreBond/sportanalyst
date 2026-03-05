@@ -300,8 +300,7 @@ class ModelRegistry:
 
         was_promoted = False
         if should_promote:
-            was_promote = self.promote_model(run_id, model_name, promote_to)
-            was_promoted = was_promote
+            was_promoted = self.promote_model(run_id, model_name, promote_to)
 
         logger.info(
             "register_complete",
