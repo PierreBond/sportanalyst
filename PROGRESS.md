@@ -94,7 +94,7 @@ Status legend:
 | STEP 39 | [x] | Implement Catapult adapter (in ingestion service) | F.1 |
 | STEP 40 | [x] | Implement WHOOP adapter (in ingestion service) | F.1 |
 | STEP 41 | [x] | Build biometric_service: acwr.py, injury_risk.py, wellness.py, publisher.py | I |
-| STEP 42 | [ ] | Train injury-risk classifier, log to MLflow | I.2 |
+| STEP 42 | [x] | Train injury-risk classifier, log to MLflow | I.2 |
 | STEP 43 | [ ] | Build NLP scrapers: twitter.py, reddit.py, news_rss.py | J.2 |
 | STEP 44 | [ ] | Build preprocessing.py (tokenize, clean, POS tag) | J.1 |
 | STEP 45 | [ ] | Build classifier.py (BERT sentiment) | J.3 |
@@ -460,4 +460,27 @@ Status legend:
 - LSP errors expected since sports_common not installed in environment
 
 **NEXT:** Continue with Step 42 - Train injury-risk classifier, or Step 43 - Build NLP scrapers
+
+#### Session 12 — March 5, 2026
+
+**Steps completed this session:** STEP 42 (Injury-risk classifier training)
+**Duration context:** medium session
+
+**Work done:**
+- Created services/model_training/src/models/injury_risk.py - XGBoost classifier for injury prediction
+- Created services/model_training/src/injury_risk_data_loader.py - Data loader with chronological splits
+- Created services/model_training/src/train_injury_risk.py - Training CLI with MLflow logging
+- Created services/model_training/configs/injury_risk.yaml - Model configuration
+- Updated services/model_training/src/models/__init__.py - exported InjuryRiskModel
+
+**Decisions made:**
+- Used XGBoost classifier per I.2 requirements
+- Implemented chronological train/val/test splits
+- Logs to MLflow experiment "injury-risk"
+- Features: ACWR, HRV, resting HR trend, sleep score, cumulative load
+
+**Issues encountered:**
+- LSP errors expected since dependencies not installed
+
+**NEXT:** Continue with Step 43 - Build NLP scrapers (twitter.py, reddit.py, news_rss.py)
 
