@@ -86,6 +86,14 @@ class Settings(BaseSettings):
         default="",
         validation_alias="TWITTER_BEARER_TOKEN",
     )
+    twitter_auth_token: str = Field(
+        default="",
+        validation_alias="TWITTER_AUTH_TOKEN",
+    )
+    twitter_ct0: str = Field(
+        default="",
+        validation_alias="TWITTER_CT0",
+    )
     reddit_client_id: str = Field(
         default="",
         validation_alias="REDDIT_CLIENT_ID",

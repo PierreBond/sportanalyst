@@ -95,11 +95,11 @@ Status legend:
 | STEP 40 | [x] | Implement WHOOP adapter (in ingestion service) | F.1 |
 | STEP 41 | [x] | Build biometric_service: acwr.py, injury_risk.py, wellness.py, publisher.py | I |
 | STEP 42 | [x] | Train injury-risk classifier, log to MLflow | I.2 |
-| STEP 43 | [ ] | Build NLP scrapers: twitter.py, reddit.py, news_rss.py | J.2 |
-| STEP 44 | [ ] | Build preprocessing.py (tokenize, clean, POS tag) | J.1 |
-| STEP 45 | [ ] | Build classifier.py (BERT sentiment) | J.3 |
-| STEP 46 | [ ] | Build event_detector.py (breaking news alerts) | J.4 |
-| STEP 47 | [ ] | Build publisher.py (Kafka output) | J |
+| STEP 43 | [x] | Build NLP scrapers: twitter.py, reddit.py, news_rss.py | J.2 |
+| STEP 44 | [x] | Build preprocessing.py (tokenize, clean, POS tag) | J.1 |
+| STEP 45 | [x] | Build classifier.py (BERT sentiment) | J.3 |
+| STEP 46 | [x] | Build event_detector.py (breaking news alerts) | J.4 |
+| STEP 47 | [x] | Build publisher.py (Kafka output) | J |
 | STEP 48 | [ ] | Integration test: scrape → classify → Kafka → feature store | Q.1 |
 
 ### Sprint 6 — Calibration & Serving (Weeks 10–11)
@@ -483,4 +483,29 @@ Status legend:
 - LSP errors expected since dependencies not installed
 
 **NEXT:** Continue with Step 43 - Build NLP scrapers (twitter.py, reddit.py, news_rss.py)
+
+#### Session 13 — March 5, 2026
+
+**Steps completed this session:** STEP 43 – STEP 47 (NLP scrapers + processing pipeline)
+**Duration context:** long session
+
+**Work done:**
+- Created services/nlp_service/src/scrapers/twitter.py - Twitter API v2 scraper with OAuth, deduplication
+- Created services/nlp_service/src/scrapers/reddit.py - Reddit OAuth scraper for sports subreddits
+- Created services/nlp_service/src/scrapers/news_rss.py - RSS feed scraper (ESPN, BBC, Bleacher Report)
+- Created services/nlp_service/src/scrapers/__init__.py - scraper exports
+- Created services/nlp_service/src/preprocessing.py - Text preprocessing (cleaning, tokenization)
+- Created services/nlp_service/src/classifier.py - BERT sentiment classifier with aggregation
+- Created services/nlp_service/src/event_detector.py - Breaking news event detector
+- Created services/nlp_service/src/publisher.py - Kafka publisher for sentiment/alerts
+
+**Decisions made:**
+- Used nlptown/bert-base-multilingual-uncased-sentiment model per J.3
+- Implemented SHA-256 deduplication for all scrapers
+- Event detector recognizes: injury, suspension, lineup, manager, signing, negative sentiment
+
+**Issues encountered:**
+- LSP errors expected since dependencies not installed
+
+**NEXT:** Continue with STEP 48 - Integration test or proceed to Sprint 6 (Calibration & Serving)
 
