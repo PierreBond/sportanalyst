@@ -12,10 +12,10 @@
 
 | Metric | Value |
 |:---|:---|
-| **Current Sprint** | Sprint 5 |
-| **Current Step** | STEP 39 |
-| **Steps Completed** | 80 / 84 |
-| **Overall Progress** | 95% |
+| **Current Sprint** | Sprint 6 |
+| **Current Step** | STEP 49 |
+| **Steps Completed** | 54 / 84 |
+| **Overall Progress** | 64% |
 | **Blockers** | None |
 
 ---
