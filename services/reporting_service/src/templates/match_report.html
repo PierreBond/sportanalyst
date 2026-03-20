@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Match Report - {{ home_team }} vs {{ away_team }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            color: #1a1a2e;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        
+        .header .meta {
+            opacity: 0.8;
+            font-size: 14px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        
+        .card h2 {
+            color: #16213e;
+            font-size: 18px;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #0f3460;
+        }
+        
+        .prob-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+        
+        .prob-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        
+        .prob-card.home {
+            border-color: #0f3460;
+            background: linear-gradient(180deg, #e8eef5 0%, #f8f9fa 100%);
+        }
+        
+        .prob-card.draw {
+            border-color: #6c757d;
+            background: linear-gradient(180deg, #f0f0f0 0%, #f8f9fa 100%);
+        }
+        
+        .prob-card.away {
+            border-color: #dc3545;
+            background: linear-gradient(180deg, #fce8e8 0%, #f8f9fa 100%);
+        }
+        
+        .prob-card .label {
+            font-size: 14px;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+        
+        .prob-card .value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+        
+        .prob-card.highlight {
+            transform: scale(1.05);
+            box-shadow: 0 4px 16px rgba(15, 52, 96, 0.2);
+        }
+        
+        .drivers-list {
+            list-style: none;
+        }
+        
+        .driver-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .driver-item.positive {
+            border-left: 4px solid #28a745;
+        }
+        
+        .driver-item.negative {
+            border-left: 4px solid #dc3545;
+        }
+        
+        .driver-label {
+            font-weight: 500;
+        }
+        
+        .driver-impact {
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+        }
+        
+        .driver-impact.positive {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .driver-impact.negative {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .market-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .market-table th,
+        .market-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .market-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .bet-card {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border-left: 4px solid #28a745;
+        }
+        
+        .bet-card .selection {
+            font-weight: 700;
+            font-size: 18px;
+            color: #155724;
+        }
+        
+        .bet-card .details {
+            display: flex;
+            gap: 24px;
+            margin-top: 8px;
+            font-size: 14px;
+            color: #495057;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+            font-size: 13px;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .biometric-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .team-card {
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .team-card h4 {
+            color: #16213e;
+            margin-bottom: 12px;
+        }
+        
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .metric-row:last-child {
+            border-bottom: none;
+        }
+        
+        @media print {
+            body {
+                background: white;
+            }
+            
+            .container {
+                max-width: 100%;
+                padding: 20px;
+            }
+            
+            .card {
+                box-shadow: none;
+                border: 1px solid #e9ecef;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ home_team }} vs {{ away_team }}</h1>
+            <div class="meta">
+                <span>League: {{ league | default('Premier League') }}</span> |
+                <span>Generated: {{ generated_at }}</span>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Probabilistic Forecasts</h2>
+            <div class="prob-grid">
+                <div class="prob-card home {% if home_win_prob > draw_prob and home_win_prob > away_win_prob %}highlight{% endif %}">
+                    <div class="label">{{ home_team }} Win</div>
+                    <div class="value">{{ (home_win_prob * 100) | round(1) }}%</div>
+                </div>
+                <div class="prob-card draw {% if draw_prob > home_win_prob and draw_prob > away_win_prob %}highlight{% endif %}">
+                    <div class="label">Draw</div>
+                    <div class="value">{{ (draw_prob * 100) | round(1) }}%</div>
+                </div>
+                <div class="prob-card away {% if away_win_prob > home_win_prob and away_win_prob > draw_prob %}highlight{% endif %}">
+                    <div class="label">{{ away_team }} Win</div>
+                    <div class="value">{{ (away_win_prob * 100) | round(1) }}%</div>
+                </div>
+            </div>
+            {% if predicted_home_score is not none and predicted_away_score is not none %}
+            <p style="text-align: center; margin-top: 20px; font-size: 18px;">
+                <strong>Predicted Score:</strong> 
+                {{ home_team }} {{ predicted_home_score }} - {{ predicted_away_score }} {{ away_team }}
+            </p>
+            {% endif %}
+        </div>
+        
+        {% if shap_explanation %}
+        <div class="card">
+            <h2>Key Prediction Drivers (SHAP)</h2>
+            {% if shap_explanation.positive_drivers %}
+            <h3 style="color: #28a745; margin: 16px 0 12px;">Positive Factors</h3>
+            <ul class="drivers-list">
+                {% for driver in shap_explanation.positive_drivers[:5] %}
+                <li class="driver-item positive">
+                    <span class="driver-label">{{ driver.label }}</span>
+                    <span class="driver-impact positive">+{{ (driver.impact * 100) | round(1) }}%</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            
+            {% if shap_explanation.negative_drivers %}
+            <h3 style="color: #dc3545; margin: 16px 0 12px;">Negative Factors</h3>
+            <ul class="drivers-list">
+                {% for driver in shap_explanation.negative_drivers[:5] %}
+                <li class="driver-item negative">
+                    <span class="driver-label">{{ driver.label }}</span>
+                    <span class="driver-impact negative">{{ (driver.impact * 100) | round(1) }}%</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        {% if market_data %}
+        <div class="card">
+            <h2>Market Dynamics</h2>
+            <table class="market-table">
+                <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                </tr>
+                {% if market_data.opening_spread is not none %}
+                <tr>
+                    <td>Opening Spread</td>
+                    <td>{{ market_data.opening_spread }}</td>
+                </tr>
+                {% endif %}
+                {% if market_data.current_spread is not none %}
+                <tr>
+                    <td>Current Spread</td>
+                    <td>{{ market_data.current_spread }}</td>
+                </tr>
+                {% endif %}
+                {% if market_data.line_movement_direction is not none %}
+                <tr>
+                    <td>Line Movement</td>
+                    <td>
+                        {% if market_data.line_movement_direction == 'toward_home' %}
+                        <span class="badge badge-warning">→ Home</span>
+                        {% elif market_data.line_movement_direction == 'toward_away' %}
+                        <span class="badge badge-warning">→ Away</span>
+                        {% else %}
+                        <span class="badge badge-success">Stable</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endif %}
+                {% if market_data.sharp_money_alert %}
+                <tr>
+                    <td>Sharp Money Alert</td>
+                    <td><span class="badge badge-warning">⚠ Active</span></td>
+                </tr>
+                {% endif %}
+            </table>
+        </div>
+        {% endif %}
+        
+        {% if biometric_data %}
+        <div class="card">
+            <h2>Team Biometric Status</h2>
+            <div class="biometric-grid">
+                <div class="team-card">
+                    <h4>{{ home_team }}</h4>
+                    <div class="metric-row">
+                        <span>Avg ACWR</span>
+                        <strong>{{ biometric_data.home_avg_acwr | default('N/A') }}</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>Injury Risk</span>
+                        <strong>{{ (biometric_data.home_injury_risk * 100) | round(0) if biometric_data.home_injury_risk else 'N/A' }}%</strong>
+                    </div>
+                </div>
+                <div class="team-card">
+                    <h4>{{ away_team }}</h4>
+                    <div class="metric-row">
+                        <span>Avg ACWR</span>
+                        <strong>{{ biometric_data.away_avg_acwr | default('N/A') }}</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>Injury Risk</span>
+                        <strong>{{ (biometric_data.away_injury_risk * 100) | round(0) if biometric_data.away_injury_risk else 'N/A' }}%</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if value_bets %}
+        <div class="card">
+            <h2>Strategic Recommendations</h2>
+            {% for bet in value_bets %}
+            <div class="bet-card">
+                <div class="selection">{{ bet.selection | upper }}</div>
+                <div class="details">
+                    <span>Odds: {{ bet.best_odds }}</span>
+                    <span>Edge: {{ (bet.edge * 100) | round(1) }}%</span>
+                    <span>Kelly: {{ bet.kelly_stake_pct | round(2) }}%</span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        
+        <div class="footer">
+            <p>Generated by Sports Prediction System</p>
+            <p>Report ID: {{ match_id }}</p>
+        </div>
+    </div>
+</body>
+</html>

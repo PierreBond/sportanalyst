@@ -1,0 +1,156 @@
+groups:
+  - name: sports_prediction_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: sum(rate(http_requests_total{status_code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "HTTP 5xx error rate is {{ $value | humanizePercentage }} (> 5%)"
+          runbook_url: "https://wiki.example.com/runbooks/high-error-rate"
+
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint)) > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "High API latency detected"
+          description: "Endpoint {{ $labels.endpoint }} p95 latency is {{ $value | humanizeDuration }}"
+          runbook_url: "https://wiki.example.com/runbooks/high-latency"
+
+      - alert: ServiceDown
+        expr: up{job=~"sports-prediction-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Service is down"
+          description: "{{ $labels.job }} has been down for more than 1 minute"
+          runbook_url: "https://wiki.example.com/runbooks/service-down"
+
+      - alert: HighMemoryUsage
+        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "High memory usage"
+          description: "Container {{ $labels.container }} memory usage is {{ $value | humanizePercentage }} of limit"
+          runbook_url: "https://wiki.example.com/runbooks/high-memory"
+
+      - alert: HighCPUUsage
+        expr: (container_cpu_usage_seconds_total / container_spec_cpu_quota * container_spec_cpu_period_seconds) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "High CPU usage"
+          description: "Container {{ $labels.container }} CPU usage is above 90%"
+          runbook_url: "https://wiki.example.com/runbooks/high-cpu"
+
+      - alert: ModelBrierScoreDegraded
+        expr: brier_score_current > 0.22
+        for: 1h
+        labels:
+          severity: critical
+          team: ml
+        annotations:
+          summary: "Model Brier score degraded"
+          description: "Current Brier score is {{ $value }}, above threshold of 0.22"
+          runbook_url: "https://wiki.example.com/runbooks/model-degraded"
+
+      - alert: ModelAccuracyDrop
+        expr: model_accuracy_current < 0.55
+        for: 24h
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "Model accuracy dropped"
+          description: "Model accuracy is {{ $value | humanizePercentage }}, below expected threshold"
+          runbook_url: "https://wiki.example.com/runbooks/model-accuracy-drop"
+
+      - alert: NegativeClosingLineValue
+        expr: avg_clv_7d < -0.05
+        for: 7d
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "Negative Closing Line Value"
+          description: "7-day average CLV is {{ $value | humanizePercentage }}, indicating model needs retraining"
+          runbook_url: "https://wiki.example.com/runbooks/negative-clv"
+
+      - alert: DataIngestionStalled
+        expr: increase(data_ingestion_bytes_total[1h]) == 0
+        for: 30m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Data ingestion stalled"
+          description: "No data ingested in the last 30 minutes"
+          runbook_url: "https://wiki.example.com/runbooks/data-ingestion-stalled"
+
+      - alert: KafkaConsumerLag
+        expr: kafka_consumer_lag_messages > 10000
+        for: 15m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Kafka consumer lag is high"
+          description: "Consumer lag for {{ $labels.topic }} is {{ $value }} messages"
+          runbook_url: "https://wiki.example.com/runbooks/kafka-lag"
+
+      - alert: CacheHitRateLow
+        expr: cache_hits_total / (cache_hits_total + cache_misses_total) < 0.7
+        for: 1h
+        labels:
+          severity: info
+          team: backend
+        annotations:
+          summary: "Cache hit rate is low"
+          description: "Cache hit rate is {{ $value | humanizePercentage }}, may need cache warming"
+          runbook_url: "https://wiki.example.com/runbooks/cache-hit-rate"
+
+      - alert: FeatureNullRateHigh
+        expr: sum(rate(data_quality_null_values_total[5m])) by (feature) / sum(rate(data_quality_total_samples[5m])) > 0.1
+        for: 30m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "High null rate for feature"
+          description: "Feature {{ $labels.feature }} has {{ $value | humanizePercentage }} null rate"
+          runbook_url: "https://wiki.example.com/runbooks/feature-null-rate"
+
+      - alert: DatabaseConnectionPoolExhausted
+        expr: database_connections_active / database_connections_max > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Active connections are {{ $value | humanizePercentage }} of maximum"
+          runbook_url: "https://wiki.example.com/runbooks/db-pool-exhausted"
+
+      - alert: PodRestartLoop
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Pod is restarting frequently"
+          description: "Pod {{ $labels.pod }} in {{ $labels.namespace }} has restarted {{ $value | humanize }} times in 15 minutes"
+          runbook_url: "https://wiki.example.com/runbooks/pod-restart-loop"

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
 @dataclass
@@ -16,34 +19,74 @@ class MatchResearchSnapshot:
     match_id: str
     home_team: str
     away_team: str
+    league: str = "Premier League"
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    # Probabilistic forecasts
     home_win_prob: float = 0.0
     draw_prob: float = 0.0
     away_win_prob: float = 0.0
     predicted_home_score: float | None = None
     predicted_away_score: float | None = None
 
-    # SHAP explanation
-    shap_positive_drivers: list[dict[str, Any]] = field(default_factory=list)
-    shap_negative_drivers: list[dict[str, Any]] = field(default_factory=list)
+    shap_explanation: dict[str, Any] | None = None
 
-    # Market data
-    opening_odds_home: float | None = None
-    closing_odds_home: float | None = None
-    line_movement: float | None = None
-    sharp_money_indicator: str | None = None
-    clv: float | None = None
+    market_data: dict[str, Any] | None = None
 
-    # Biometric summary
-    home_team_avg_acwr: float | None = None
-    away_team_avg_acwr: float | None = None
-    home_injury_risk_score: float | None = None
-    away_injury_risk_score: float | None = None
+    biometric_data: dict[str, Any] | None = None
 
-    # Value bets
     value_bets: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert snapshot to dictionary for template rendering."""
+        return {
+            "match_id": self.match_id,
+            "home_team": self.home_team,
+            "away_team": self.away_team,
+            "league": self.league,
+            "generated_at": self.generated_at.strftime("%Y-%m-%d %H:%M UTC"),
+            "home_win_prob": self.home_win_prob,
+            "draw_prob": self.draw_prob,
+            "away_win_prob": self.away_win_prob,
+            "predicted_home_score": self.predicted_home_score,
+            "predicted_away_score": self.predicted_away_score,
+            "shap_explanation": self.shap_explanation or {},
+            "market_data": self.market_data or {},
+            "biometric_data": self.biometric_data or {},
+            "value_bets": self.value_bets,
+        }
+
+
+TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+_env: Environment | None = None
+
+
+def _get_env() -> Environment:
+    """Get or create Jinja2 environment."""
+    global _env
+    if _env is None:
+        _env = Environment(
+            loader=FileSystemLoader(str(TEMPLATE_DIR)),
+            autoescape=select_autoescape(["html", "xml"]),
+            trim_blocks=True,
+            lstrip_blocks=True,
+        )
+        _env.filters["default"] = lambda val, default: val if val is not None else default
+    return _env
+
+
+def build_html_report(snapshot: MatchResearchSnapshot) -> str:
+    """Render a MatchResearchSnapshot as an HTML report.
+
+    Args:
+        snapshot: The assembled match research data.
+
+    Returns:
+        HTML string of the full match report.
+    """
+    env = _get_env()
+    template = env.get_template("match_report.html")
+    return template.render(**snapshot.to_dict())
 
 
 def build_markdown_report(snapshot: MatchResearchSnapshot) -> str:
@@ -55,67 +98,27 @@ def build_markdown_report(snapshot: MatchResearchSnapshot) -> str:
     Returns:
         Markdown string of the full match report.
     """
-    lines = [
-        f"# Match Research Report",
-        "",
-        f"## {snapshot.home_team} vs {snapshot.away_team}",
-        "",
-        f"**Generated:** {snapshot.generated_at.strftime('%Y-%m-%d %H:%M UTC')}",
-        "",
-        "### Probabilistic Forecasts",
-        "",
-        "| Outcome | Probability |",
-        "|---------|-------------|",
-        f"| {snapshot.home_team} Win | {snapshot.home_win_prob:.1%} |",
-        f"| Draw | {snapshot.draw_prob:.1%} |",
-        f"| {snapshot.away_team} Win | {snapshot.away_win_prob:.1%} |",
-        "",
-    ]
+    env = _get_env()
+    template = env.get_template("match_report.md")
+    return template.render(**snapshot.to_dict())
 
-    if snapshot.predicted_home_score is not None and snapshot.predicted_away_score is not None:
-        lines.append(f"**Predicted Score:** {snapshot.home_team} {snapshot.predicted_home_score:.1f} - {snapshot.predicted_away_score:.1f} {snapshot.away_team}")
-        lines.append("")
 
-    if snapshot.shap_positive_drivers or snapshot.shap_negative_drivers:
-        lines.append("### Key Drivers (SHAP)")
-        lines.append("")
-        if snapshot.shap_positive_drivers:
-            lines.append("**Positive:**")
-            for d in snapshot.shap_positive_drivers[:5]:
-                lines.append(f"- {d.get('label', d.get('feature', ''))}")
-            lines.append("")
-        if snapshot.shap_negative_drivers:
-            lines.append("**Negative:**")
-            for d in snapshot.shap_negative_drivers[:5]:
-                lines.append(f"- {d.get('label', d.get('feature', ''))}")
-            lines.append("")
+def build_report(snapshot: MatchResearchSnapshot, format: str = "html") -> str:
+    """Build a report in the specified format.
 
-    if snapshot.opening_odds_home is not None:
-        lines.append("### Market Dynamics")
-        lines.append("")
-        if snapshot.opening_odds_home:
-            lines.append(f"- Opening odds (home): {snapshot.opening_odds_home:.2f}")
-        if snapshot.closing_odds_home:
-            lines.append(f"- Closing odds (home): {snapshot.closing_odds_home:.2f}")
-        if snapshot.line_movement is not None:
-            lines.append(f"- Line movement: {snapshot.line_movement:+.2f}")
-        if snapshot.sharp_money_indicator:
-            lines.append(f"- Sharp money: {snapshot.sharp_money_indicator}")
-        if snapshot.clv is not None:
-            lines.append(f"- CLV: {snapshot.clv:+.1%}")
-        lines.append("")
+    Args:
+        snapshot: The assembled match research data.
+        format: Output format - "html" or "markdown".
 
-    if snapshot.value_bets:
-        lines.append("### Strategic Recommendations")
-        lines.append("")
-        for i, bet in enumerate(snapshot.value_bets, 1):
-            selection = bet.get("selection", "Unknown")
-            odds = bet.get("odds", 0)
-            edge = bet.get("edge", 0)
-            lines.append(f"{i}. **{selection}** @ {odds:.2f} (edge: {edge:.1%})")
-        lines.append("")
+    Returns:
+        Report string in the specified format.
 
-    lines.append("---")
-    lines.append("*Generated by Sports Prediction System*")
-
-    return "\n".join(lines)
+    Raises:
+        ValueError: If format is not supported.
+    """
+    if format == "html":
+        return build_html_report(snapshot)
+    elif format == "markdown":
+        return build_markdown_report(snapshot)
+    else:
+        raise ValueError(f"Unsupported format: {format}. Use 'html' or 'markdown'.")
