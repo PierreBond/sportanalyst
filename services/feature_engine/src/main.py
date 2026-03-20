@@ -43,6 +43,13 @@ KAFKA_PROCESSED_SENTIMENT = "processed.sentiment"
 KAFKA_PROCESSED_BIOMETRIC = "processed.biometric-features"
 KAFKA_OUTPUT_FEATURES = "processed.features"
 
+# Window sizes for rolling feature computation (RULE-10)
+ROLLING_WINDOW_5_START = -4
+ROLLING_WINDOW_5_END = -1
+ROLLING_WINDOW_10_START = -9
+ROLLING_WINDOW_10_END = -1
+TICKET_PCT_HOME_THRESHOLD = 0.5
+
 
 def create_spark_session(app_name: str = "feature-engine") -> SparkSession:
     """Create and configure Spark session."""
@@ -114,10 +121,28 @@ def compute_temporal_features_df(
     matches_df: DataFrame,
     events_df: DataFrame,
 ) -> DataFrame:
-    """Compute temporal features from match events."""
+    """Compute temporal features from match events.
+
+    Chains rolling averages, lag features, and rest days onto the match DataFrame.
+
+    Args:
+        matches_df: DataFrame of matches.
+        events_df: DataFrame of match events.
+
+    Returns:
+        DataFrame with temporal features appended.
+    """
     if events_df.isEmpty():
         return matches_df
 
+    matches_with_goals = _join_goal_aggregates(matches_df, events_df)
+    result = _add_rolling_features(matches_with_goals)
+    result = _add_lag_and_rest_features(result)
+    return result
+
+
+def _join_goal_aggregates(matches_df: DataFrame, events_df: DataFrame) -> DataFrame:
+    """Join goal aggregates onto matches DataFrame."""
     team_goals = events_df.filter(F.col("event_type") == "goal").groupBy(
         "team_id", "match_id", "venue_type"
     ).agg(
@@ -126,16 +151,23 @@ def compute_temporal_features_df(
         F.sum(F.when(F.col("team_id") == F.col("away_team_id"), 1).otherwise(0)).alias("away_goals"),
     )
 
-    matches_with_goals = matches_df.join(
+    return matches_df.join(
         team_goals,
         matches_df.match_id == team_goals.match_id,
         "left",
     )
 
-    window_5 = Window.partitionBy("team_id").orderBy("scheduled_at").rowsBetween(-4, -1)
-    window_10 = Window.partitionBy("team_id").orderBy("scheduled_at").rowsBetween(-9, -1)
 
-    result = matches_with_goals.withColumn(
+def _add_rolling_features(df: DataFrame) -> DataFrame:
+    """Add rolling average and standard deviation features."""
+    window_5 = Window.partitionBy("team_id").orderBy("scheduled_at").rowsBetween(
+        ROLLING_WINDOW_5_START, ROLLING_WINDOW_5_END,
+    )
+    window_10 = Window.partitionBy("team_id").orderBy("scheduled_at").rowsBetween(
+        ROLLING_WINDOW_10_START, ROLLING_WINDOW_10_END,
+    )
+
+    return df.withColumn(
         "rolling_avg_goals_5",
         F.avg("goals_scored").over(window_5),
     ).withColumn(
@@ -146,27 +178,43 @@ def compute_temporal_features_df(
         F.stddev("goals_scored").over(window_5),
     )
 
-    result = result.withColumn(
+
+def _add_lag_and_rest_features(df: DataFrame) -> DataFrame:
+    """Add lag and rest day features."""
+    team_order = Window.partitionBy("team_id").orderBy("scheduled_at")
+
+    result = df.withColumn(
         "lag_1_goals",
-        F.lag("goals_scored", 1).over(Window.partitionBy("team_id").orderBy("scheduled_at")),
+        F.lag("goals_scored", 1).over(team_order),
     ).withColumn(
         "lag_2_goals",
-        F.lag("goals_scored", 2).over(Window.partitionBy("team_id").orderBy("scheduled_at")),
+        F.lag("goals_scored", 2).over(team_order),
     ).withColumn(
         "lag_3_goals",
-        F.lag("goals_scored", 3).over(Window.partitionBy("team_id").orderBy("scheduled_at")),
+        F.lag("goals_scored", 3).over(team_order),
     )
 
     result = result.withColumn(
         "rest_days",
-        F.datediff("scheduled_at", F.lag("scheduled_at", 1).over(Window.partitionBy("team_id").orderBy("scheduled_at"))),
+        F.datediff("scheduled_at", F.lag("scheduled_at", 1).over(team_order)),
     ).fillna({"rest_days": 7})
 
     return result
 
 
 def compute_odds_features(odds_df: DataFrame, matches_df: DataFrame) -> DataFrame:
-    """Compute market/odds-derived features."""
+    """Compute market/odds-derived features.
+
+    Joins opening/closing odds onto matches and derives implied probabilities,
+    line movement, cash-ticket divergence, and reverse line movement indicators.
+
+    Args:
+        odds_df: DataFrame of odds snapshots.
+        matches_df: DataFrame of matches.
+
+    Returns:
+        DataFrame with odds-derived features appended.
+    """
     if odds_df.isEmpty():
         return matches_df
 
@@ -198,10 +246,10 @@ def compute_odds_features(odds_df: DataFrame, matches_df: DataFrame) -> DataFram
     ).withColumn(
         "reverse_line_movement",
         F.when(
-            (F.col("line_movement_spread") > 0) & (F.col("ticket_pct_home") < 0.5),
+            (F.col("line_movement_spread") > 0) & (F.col("ticket_pct_home") < TICKET_PCT_HOME_THRESHOLD),
             1,
         ).when(
-            (F.col("line_movement_spread") < 0) & (F.col("ticket_pct_home") > 0.5),
+            (F.col("line_movement_spread") < 0) & (F.col("ticket_pct_home") > TICKET_PCT_HOME_THRESHOLD),
             1,
         ).otherwise(0),
     )

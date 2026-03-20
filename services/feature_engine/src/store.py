@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from alembic.models import FeatureStore, Match
 from sports_common.config import settings
 from sports_common.kafka_client import KafkaProducerWrapper
+from sports_common.schemas.features import FeatureVector
 
 logger = structlog.get_logger(__name__)
 
@@ -154,7 +155,7 @@ class FeatureStoreWriter:
     async def get_features_by_match(
         self,
         match_id: str,
-    ) -> dict[str, Any] | None:
+    ) -> FeatureVector | None:
         """Retrieve the latest features for a match."""
         async with self._async_session_factory() as session:
             stmt = (
@@ -167,19 +168,19 @@ class FeatureStoreWriter:
             feature_record = result.scalar_one_or_none()
 
             if feature_record:
-                return {
-                    "feature_id": str(feature_record.feature_id),
-                    "match_id": str(feature_record.match_id),
-                    "computed_at": feature_record.computed_at.isoformat(),
-                    "version": feature_record.version,
-                    "features": feature_record.features,
-                }
+                return FeatureVector(
+                    feature_id=feature_record.feature_id,
+                    match_id=feature_record.match_id,
+                    computed_at=feature_record.computed_at,
+                    features=feature_record.features,
+                    version=feature_record.version,
+                )
             return None
 
     async def get_all_features_for_match(
         self,
         match_id: str,
-    ) -> list[dict[str, Any]]:
+    ) -> list[FeatureVector]:
         """Retrieve all feature records for a match."""
         async with self._async_session_factory() as session:
             stmt = (
@@ -191,13 +192,13 @@ class FeatureStoreWriter:
             records = result.scalars().all()
 
             return [
-                {
-                    "feature_id": str(r.feature_id),
-                    "match_id": str(r.match_id),
-                    "computed_at": r.computed_at.isoformat(),
-                    "version": r.version,
-                    "features": r.features,
-                }
+                FeatureVector(
+                    feature_id=r.feature_id,
+                    match_id=r.match_id,
+                    computed_at=r.computed_at,
+                    features=r.features,
+                    version=r.version,
+                )
                 for r in records
             ]
 

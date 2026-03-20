@@ -134,18 +134,18 @@ def compute_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     """Compute all temporal features for a match DataFrame."""
     result = df.copy()
 
-    if "goals_scored" in df.columns:
-        result = add_rolling_avg(df, "goals_scored", 5, ["team_id", "venue_type"], "rolling_avg_goals_5")
-        result = add_rolling_avg(df, "goals_scored", 10, ["team_id"], "rolling_avg_goals_10")
-        result = add_rolling_std(df, "goals_scored", 5, ["team_id"], "rolling_std_goals_5")
-        result = add_lag_feature(df, "goals_scored", 1, ["team_id"], "lag_1_goals")
-        result = add_lag_feature(df, "goals_scored", 2, ["team_id"], "lag_2_goals")
-        result = add_lag_feature(df, "goals_scored", 3, ["team_id"], "lag_3_goals")
+    if "goals_scored" in result.columns:
+        result = add_rolling_avg(result, "goals_scored", 5, ["team_id", "venue_type"], "rolling_avg_goals_5")
+        result = add_rolling_avg(result, "goals_scored", 10, ["team_id"], "rolling_avg_goals_10")
+        result = add_rolling_std(result, "goals_scored", 5, ["team_id"], "rolling_std_goals_5")
+        result = add_lag_feature(result, "goals_scored", 1, ["team_id"], "lag_1_goals")
+        result = add_lag_feature(result, "goals_scored", 2, ["team_id"], "lag_2_goals")
+        result = add_lag_feature(result, "goals_scored", 3, ["team_id"], "lag_3_goals")
 
-    if "xg" in df.columns:
-        result = add_rolling_avg(df, "xg", 5, ["team_id"], "rolling_avg_xg_5")
-        result = add_momentum_slope(df, "xg", 5, ["team_id"], "momentum_xg_slope_5")
-        result = add_momentum_slope(df, "xg", 12, ["team_id"], "momentum_xg_slope_12")
+    if "xg" in result.columns:
+        result = add_rolling_avg(result, "xg", 5, ["team_id"], "rolling_avg_xg_5")
+        result = add_momentum_slope(result, "xg", 5, ["team_id"], "momentum_xg_slope_5")
+        result = add_momentum_slope(result, "xg", 12, ["team_id"], "momentum_xg_slope_12")
 
     result = add_rest_days(result)
 

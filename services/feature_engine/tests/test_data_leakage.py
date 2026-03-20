@@ -94,16 +94,19 @@ class TestDataLeakage:
             "team_id": ["A", "A", "A"],
             "match_datetime": [
                 datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc),
-                datetime(2024, 1, 8, 12, 0, tzinfo=timezone.utc),
-                datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc),
+                datetime(2024, 1, 4, 12, 0, tzinfo=timezone.utc),
+                datetime(2024, 1, 14, 12, 0, tzinfo=timezone.utc),
             ],
         })
 
         result = add_rest_days(df)
 
+        # First row has no previous match; should use fillna default (7)
         assert result.loc[0, "rest_days"] == 7
-        assert result.loc[1, "rest_days"] == 7
-        assert result.loc[2, "rest_days"] == 7
+        # Second row: 4 Jan - 1 Jan = 3 days
+        assert result.loc[1, "rest_days"] == 3
+        # Third row: 14 Jan - 4 Jan = 10 days
+        assert result.loc[2, "rest_days"] == 10
 
     def test_sentiment_uses_only_historical_data(self) -> None:
         """Verify sentiment features only use data before match time."""

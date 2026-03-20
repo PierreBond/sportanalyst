@@ -55,8 +55,23 @@ class BaseAdapter(abc.ABC):
 
     @abc.abstractmethod
     async def health_check(self) -> bool:
-        """Verify connectivity to the provider. Default: True."""
-        return True
+        """Verify connectivity to the provider."""
+        ...
+
+    @abc.abstractmethod
+    async def fetch_live_events(self, **kwargs: any) -> list[dict[str, any]]:
+        """Fetch live events from the provider."""
+        ...
+
+    @abc.abstractmethod
+    async def fetch_historical_matches(self, **kwargs: any) -> list[dict[str, any]]:
+        """Fetch historical match data from the provider."""
+        ...
+
+    @abc.abstractmethod
+    async def fetch_odds(self, **kwargs: any) -> list[dict[str, any]]:
+        """Fetch odds data from the provider."""
+        ...
 
     async def fetch_with_retry(
         self,
@@ -88,7 +103,7 @@ class BaseAdapter(abc.ABC):
                     continue
                 else:
                     response.raise_for_status()
-            except httpx.httpx.TimeoutException as e:
+            except httpx.TimeoutException as e:
                 last_exception = e
                 wait_time = (2**attempt) + random.uniform(0, 1)
                 logger.warning(
@@ -98,7 +113,7 @@ class BaseAdapter(abc.ABC):
                     wait_time=wait_time,
                 )
                 await asyncio.sleep(wait_time)
-            except httpx.httpx.HTTPError as e:
+            except httpx.HTTPStatusError as e:
                 last_exception = e
                 wait_time = (2**attempt) + random.uniform(0, 1)
                 logger.warning(

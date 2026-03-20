@@ -95,10 +95,10 @@ class EventDetector:
     - Lineup changes
     - Manager changes
     - Transfer signings
-    -
+    - Negative sentiment spikes
     """
 
-    Negative sentiment spikes def __init__(
+    def __init__(
         self,
         min_keyword_matches: int = 1,
     ) -> None:

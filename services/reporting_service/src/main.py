@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
+import structlog
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -14,6 +16,8 @@ logger = get_logger(__name__)
 
 
 class ReportRequest(BaseModel):
+    """Request body for report generation."""
+
     match_id: str
     home_team: str
     away_team: str
@@ -22,6 +26,8 @@ class ReportRequest(BaseModel):
 
 
 class ReportResponse(BaseModel):
+    """Generated match research report."""
+
     report_id: str
     match_id: str
     generated_at: datetime
@@ -31,6 +37,7 @@ class ReportResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Initialize and tear down the reporting service."""
     logger.info("reporting_service_starting")
     yield
     logger.info("reporting_service_shutting_down")
@@ -44,13 +51,55 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    """Inject correlation_id into structlog context for every request (RULE-22)."""
+    correlation_id = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(correlation_id=correlation_id)
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def structured_http_exception_handler(
+    request: Request, exc: HTTPException
+) -> JSONResponse:
+    """Return structured error JSON per RULE-19."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            "detail": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            "code": exc.status_code,
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all for unhandled errors, returning structured JSON."""
+    logger.error("unhandled_exception", error=str(exc), exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "detail": str(exc),
+            "code": 500,
+        },
+    )
+
+
 @app.get("/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
+    """Check reporting service health status."""
     return {"status": "healthy", "service": "reporting"}
 
 
 @app.post("/reports/generate", response_model=ReportResponse)
-async def generate_report(request: ReportRequest):
+async def generate_report(request: ReportRequest) -> ReportResponse:
+    """Generate a match research report."""
     logger.info("generating_report", match_id=request.match_id)
 
     report_id = f"report_{request.match_id}_{datetime.now().timestamp()}"
@@ -101,7 +150,8 @@ async def generate_report(request: ReportRequest):
 
 
 @app.get("/reports/{report_id}")
-async def get_report(report_id: str):
+async def get_report(report_id: str) -> dict[str, str]:
+    """Get a previously generated report by ID."""
     return {
         "report_id": report_id,
         "status": "ready",

@@ -9,6 +9,7 @@ def aggregate_sentiment_by_source(
     sentiment_df: pd.DataFrame,
     entity_id: str,
     time_window_hours: int = 24,
+    as_of: datetime | None = None,
 ) -> dict[str, float]:
     """Aggregate sentiment scores by source within a time window.
 
@@ -16,11 +17,17 @@ def aggregate_sentiment_by_source(
         sentiment_df: DataFrame with columns [entity_id, source, score, captured_at]
         entity_id: The entity (team/player) to aggregate for
         time_window_hours: Time window in hours
+        as_of: Reference timestamp for the lookback window. Defaults to UTC now
+            if not provided. For training data, this MUST be the match_datetime
+            to avoid temporal leakage (RULE-24/RULE-F1).
 
     Returns:
         Dict of source -> aggregated sentiment score
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=time_window_hours)
+    if as_of is None:
+        as_of = datetime.now(timezone.utc)
+
+    cutoff = as_of - timedelta(hours=time_window_hours)
 
     filtered = sentiment_df[
         (sentiment_df["entity_id"] == entity_id)
@@ -51,6 +58,7 @@ def compute_sentiment_features(
     sentiment_df: pd.DataFrame,
     entity_ids: list[str],
     time_window_hours: int = 24,
+    as_of: datetime | None = None,
 ) -> pd.DataFrame:
     """Compute sentiment features for multiple entities.
 
@@ -58,6 +66,7 @@ def compute_sentiment_features(
         sentiment_df: DataFrame with sentiment scores
         entity_ids: List of entity IDs to compute features for
         time_window_hours: Time window in hours
+        as_of: Reference timestamp for the lookback window (RULE-24).
 
     Returns:
         DataFrame with sentiment features per entity
@@ -66,7 +75,7 @@ def compute_sentiment_features(
 
     for entity_id in entity_ids:
         agg = aggregate_sentiment_by_source(
-            sentiment_df, entity_id, time_window_hours
+            sentiment_df, entity_id, time_window_hours, as_of=as_of
         )
         agg["entity_id"] = entity_id
         features.append(agg)
@@ -103,9 +112,13 @@ def sentiment_trend(
     entity_id: str,
     source: str,
     window_size: int = 5,
+    as_of: datetime | None = None,
 ) -> float:
     """Calculate sentiment trend over recent time windows."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    if as_of is None:
+        as_of = datetime.now(timezone.utc)
+
+    cutoff = as_of - timedelta(hours=24)
 
     filtered = sentiment_df[
         (sentiment_df["entity_id"] == entity_id)

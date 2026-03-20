@@ -50,3 +50,4 @@ logs/
 
 postgres_data/
 redis_data/
+coding_review.md
