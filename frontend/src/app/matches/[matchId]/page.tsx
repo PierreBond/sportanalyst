@@ -26,7 +26,7 @@ export default function MatchDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [lineMovement] = useState<LineMovement[]>(sampleLineMovement);
 
-  const { connect, disconnect, lastMessage, isConnected } = useWebSocket({
+  const { connect, disconnect, isConnected } = useWebSocket({
     onMessage: (message) => {
       if (message.type === "prediction_update" && message.probabilities) {
         setPrediction((prev) =>

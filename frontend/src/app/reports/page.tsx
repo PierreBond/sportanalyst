@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getReport, getReportPDF } from "@/lib/api";
-import type { MatchResearchSnapshot } from "@/types";
+import { useState } from "react";
+import { getReportPDF } from "@/lib/api";
 
 interface Report {
   match_id: string;
@@ -37,8 +36,7 @@ const mockReports: Report[] = [
 ];
 
 export default function ReportsPage() {
-  const [reports, setReports] = useState<Report[]>(mockReports);
-  const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [reports] = useState<Report[]>(mockReports);
   const [downloading, setDownloading] = useState<string | null>(null);
 
   const handleDownloadPDF = async (matchId: string) => {

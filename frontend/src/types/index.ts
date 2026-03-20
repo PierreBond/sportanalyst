@@ -72,6 +72,31 @@ export interface LineMovement {
   away_odds: number;
 }
 
+export interface WebSocketMessage {
+  type: "prediction_update" | "error";
+  match_id?: string;
+  timestamp: string;
+  probabilities?: {
+    home_win: number;
+    draw: number;
+    away_win: number;
+  };
+  error?: string;
+}
+
+export interface HealthResponse {
+  status: "healthy" | "unhealthy";
+  service: string;
+  version?: string;
+}
+
+export interface ModelInfo {
+  name: string;
+  version: string;
+  created_at: string;
+  status: "staging" | "production";
+}
+
 export interface MatchResearchSnapshot {
   match_id: string;
   home_team: string;
@@ -86,32 +111,4 @@ export interface MatchResearchSnapshot {
   predicted_away_score: number;
   value_bets: ValueBet[];
   shap_explanation: SHAPExplanation;
-}
-
-export interface HealthResponse {
-  status: string;
-  service: string;
-  version: string;
-}
-
-export interface ModelInfo {
-  name: string;
-  version: string;
-  stage: string;
-  accuracy: number;
-  brier_score: number;
-  trained_at: string;
-}
-
-export interface WebSocketMessage {
-  type: string;
-  match_id: string;
-  minute?: number;
-  trigger?: string;
-  probabilities?: {
-    home_win: number;
-    draw: number;
-    away_win: number;
-  };
-  timestamp: string;
 }

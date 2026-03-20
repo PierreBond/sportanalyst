@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Sports Prediction Dashboard",
@@ -22,18 +24,18 @@ export default function RootLayout({
                 </h1>
               </div>
               <div className="flex items-center space-x-4">
-                <a href="/" className="text-gray-600 hover:text-gray-900">
+                <Link href="/" className="text-gray-600 hover:text-gray-900">
                   Dashboard
-                </a>
-                <a href="/matches" className="text-gray-600 hover:text-gray-900">
+                </Link>
+                <Link href="/matches" className="text-gray-600 hover:text-gray-900">
                   Matches
-                </a>
-                <a href="/market" className="text-gray-600 hover:text-gray-900">
+                </Link>
+                <Link href="/market" className="text-gray-600 hover:text-gray-900">
                   Market
-                </a>
-                <a href="/reports" className="text-gray-600 hover:text-gray-900">
+                </Link>
+                <Link href="/reports" className="text-gray-600 hover:text-gray-900">
                   Reports
-                </a>
+                </Link>
               </div>
             </div>
           </div>
