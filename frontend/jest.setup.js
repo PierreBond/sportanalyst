@@ -22,4 +22,4 @@ global.WebSocket = jest.fn(() => ({
   addEventListener: jest.fn(),
   removeEventListener: jest.fn(),
   readyState: WebSocket.OPEN,
-})) as any;
+}));

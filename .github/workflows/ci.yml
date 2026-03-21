@@ -124,6 +124,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm run audit:ci
+
       - name: Lint frontend
         working-directory: frontend
         run: npm run lint
@@ -135,6 +139,10 @@ jobs:
       - name: Test frontend
         working-directory: frontend
         run: npm test -- --coverage
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
 
   data-leakage:
     runs-on: ubuntu-latest
