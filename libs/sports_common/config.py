@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,11 +16,9 @@ class Settings(BaseSettings):
     )
 
     database_url: str = Field(
-        default="postgresql+asyncpg://user:pass@localhost:5432/sportspred",
         validation_alias="DATABASE_URL",
     )
     database_url_sync: str = Field(
-        default="postgresql://user:pass@localhost:5432/sportspred",
         validation_alias="DATABASE_URL_SYNC",
     )
 
@@ -123,6 +121,14 @@ class Settings(BaseSettings):
         default=8005,
         validation_alias="REPORTING_SERVICE_PORT",
     )
+
+    @model_validator(mode="after")
+    def check_required_secrets(self) -> "Settings":
+        if not self.database_url:
+            raise ValueError("DATABASE_URL environment variable is required")
+        if not self.database_url_sync:
+            raise ValueError("DATABASE_URL_SYNC environment variable is required")
+        return self
 
     @property
     def kafka_consumer_group(self) -> str:

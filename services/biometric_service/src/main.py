@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from sports_common.logging import setup_logging, get_logger
 from sports_common.schemas.biometrics import ACWR, WellnessScore
+from sports_common.security import setup_security
 
 setup_logging("biometric-service")
 logger = get_logger(__name__)
@@ -52,6 +53,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+setup_security(app)
+
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
@@ -65,9 +68,7 @@ async def correlation_id_middleware(request: Request, call_next):
 
 
 @app.exception_handler(HTTPException)
-async def structured_http_exception_handler(
-    request: Request, exc: HTTPException
-) -> JSONResponse:
+async def structured_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """Return structured error JSON per RULE-19."""
     return JSONResponse(
         status_code=exc.status_code,
@@ -128,7 +129,9 @@ async def calculate_wellness(request: BiometricRequest) -> WellnessScore:
     if request.hrv:
         scores.append(min(request.hrv / WELLNESS_HRV_BASELINE, 1.0))
     if request.resting_hr:
-        scores.append(max(0, 1 - (request.resting_hr - WELLNESS_RESTING_HR_LOW) / WELLNESS_RESTING_HR_RANGE))
+        scores.append(
+            max(0, 1 - (request.resting_hr - WELLNESS_RESTING_HR_LOW) / WELLNESS_RESTING_HR_RANGE)
+        )
     if request.sleep_score:
         scores.append(request.sleep_score / 100)
 

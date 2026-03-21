@@ -70,3 +70,6 @@ db_client = DatabaseClient()
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with db_client.session() as session:
         yield session
+
+
+get_async_session = get_db

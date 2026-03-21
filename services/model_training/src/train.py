@@ -24,6 +24,10 @@ from models.deep_learning import (
 )
 from evaluator import ModelEvaluator
 from registry import ModelRegistry
+from sports_common.logging import setup_logging, get_logger
+
+setup_logging("model-training")
+logger = get_logger(__name__)
 
 
 MODEL_FACTORIES = {
@@ -152,9 +156,7 @@ def compare_and_promote(
 ) -> None:
     """Compare models and promote the best one."""
     valid_models = {
-        name: metrics
-        for name, metrics in results.items()
-        if "val_brier_score" in metrics
+        name: metrics for name, metrics in results.items() if "val_brier_score" in metrics
     }
 
     if not valid_models:
@@ -227,7 +229,7 @@ def main() -> None:
         registry = ModelRegistry()
 
         metrics = train_model(model_name, config, data_loader, registry)
-        print(f"Training complete for {model_name}: {metrics}")
+        logger.info("training_complete", model=model_name, metrics=metrics)
 
     elif args.model:
         config = {
@@ -240,22 +242,19 @@ def main() -> None:
         registry = ModelRegistry()
 
         metrics = train_model(args.model, config, data_loader, registry)
-        print(f"Training complete for {args.model}: {metrics}")
+        logger.info("training_complete", model=args.model, metrics=metrics)
 
     else:
         config_dir = base_path / args.config_dir
 
         if not config_dir.exists():
-            print(f"Config directory not found: {config_dir}")
+            logger.error("config_directory_not_found", path=str(config_dir))
             sys.exit(1)
 
         results = train_all_models(config_dir)
 
-        print("\n=== Training Results ===")
         for model_name, metrics in results.items():
-            print(f"\n{model_name}:")
-            for metric, value in metrics.items():
-                print(f"  {metric}: {value:.4f}" if isinstance(value, float) else f"  {metric}: {value}")
+            logger.info("model_results", model=model_name, metrics=metrics)
 
         if args.promote:
             registry = ModelRegistry()

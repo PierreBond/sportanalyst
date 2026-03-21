@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from sports_common.logging import setup_logging, get_logger
+from sports_common.security import setup_security
 
 setup_logging("nlp-service")
 logger = get_logger(__name__)
@@ -64,6 +65,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+setup_security(app)
+
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
@@ -77,9 +80,7 @@ async def correlation_id_middleware(request: Request, call_next):
 
 
 @app.exception_handler(HTTPException)
-async def structured_http_exception_handler(
-    request: Request, exc: HTTPException
-) -> JSONResponse:
+async def structured_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """Return structured error JSON per RULE-19."""
     return JSONResponse(
         status_code=exc.status_code,

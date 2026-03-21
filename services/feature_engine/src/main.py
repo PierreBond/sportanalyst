@@ -43,6 +43,37 @@ KAFKA_PROCESSED_SENTIMENT = "processed.sentiment"
 KAFKA_PROCESSED_BIOMETRIC = "processed.biometric-features"
 KAFKA_OUTPUT_FEATURES = "processed.features"
 
+ODDS_SCHEMA = StructType(
+    [
+        StructField("match_id", StringType(), True),
+        StructField("home_odds", DoubleType(), True),
+        StructField("away_odds", DoubleType(), True),
+        StructField("draw_odds", DoubleType(), True),
+        StructField("captured_at", TimestampType(), True),
+        StructField("cash_pct_home", DoubleType(), True),
+        StructField("ticket_pct_home", DoubleType(), True),
+    ]
+)
+
+SENTIMENT_SCHEMA = StructType(
+    [
+        StructField("entity_id", StringType(), True),
+        StructField("source", StringType(), True),
+        StructField("score", DoubleType(), True),
+        StructField("volume", DoubleType(), True),
+        StructField("captured_at", TimestampType(), True),
+    ]
+)
+
+BIOMETRIC_SCHEMA = StructType(
+    [
+        StructField("team_id", StringType(), True),
+        StructField("acwr", DoubleType(), True),
+        StructField("hrv", DoubleType(), True),
+        StructField("injury_risk", DoubleType(), True),
+    ]
+)
+
 # Window sizes for rolling feature computation (RULE-10)
 ROLLING_WINDOW_5_START = -4
 ROLLING_WINDOW_5_END = -1
@@ -88,7 +119,8 @@ def load_odds_from_kafka(spark: SparkSession) -> DataFrame:
         .option("failOnDataLoss", "false")
         .load()
     )
-    return df.select(F.from_json(F.col("value").cast("string"), "schema").alias("data")).select("data.*")
+    parsed = df.select(F.from_json(F.col("value").cast("string"), ODDS_SCHEMA).alias("data"))
+    return parsed.filter(F.col("data").isNotNull()).select("data.*")
 
 
 def load_sentiment_from_kafka(spark: SparkSession) -> DataFrame:
@@ -101,7 +133,8 @@ def load_sentiment_from_kafka(spark: SparkSession) -> DataFrame:
         .option("failOnDataLoss", "false")
         .load()
     )
-    return df.select(F.from_json(F.col("value").cast("string"), "schema").alias("data")).select("data.*")
+    parsed = df.select(F.from_json(F.col("value").cast("string"), SENTIMENT_SCHEMA).alias("data"))
+    return parsed.filter(F.col("data").isNotNull()).select("data.*")
 
 
 def load_biometric_features_from_kafka(spark: SparkSession) -> DataFrame:
@@ -114,7 +147,8 @@ def load_biometric_features_from_kafka(spark: SparkSession) -> DataFrame:
         .option("failOnDataLoss", "false")
         .load()
     )
-    return df.select(F.from_json(F.col("value").cast("string"), "schema").alias("data")).select("data.*")
+    parsed = df.select(F.from_json(F.col("value").cast("string"), BIOMETRIC_SCHEMA).alias("data"))
+    return parsed.filter(F.col("data").isNotNull()).select("data.*")
 
 
 def compute_temporal_features_df(
@@ -143,12 +177,18 @@ def compute_temporal_features_df(
 
 def _join_goal_aggregates(matches_df: DataFrame, events_df: DataFrame) -> DataFrame:
     """Join goal aggregates onto matches DataFrame."""
-    team_goals = events_df.filter(F.col("event_type") == "goal").groupBy(
-        "team_id", "match_id", "venue_type"
-    ).agg(
-        F.count("*").alias("goals_scored"),
-        F.sum(F.when(F.col("team_id") == F.col("home_team_id"), 1).otherwise(0)).alias("home_goals"),
-        F.sum(F.when(F.col("team_id") == F.col("away_team_id"), 1).otherwise(0)).alias("away_goals"),
+    team_goals = (
+        events_df.filter(F.col("event_type") == "goal")
+        .groupBy("team_id", "match_id", "venue_type")
+        .agg(
+            F.count("*").alias("goals_scored"),
+            F.sum(F.when(F.col("team_id") == F.col("home_team_id"), 1).otherwise(0)).alias(
+                "home_goals"
+            ),
+            F.sum(F.when(F.col("team_id") == F.col("away_team_id"), 1).otherwise(0)).alias(
+                "away_goals"
+            ),
+        )
     )
 
     return matches_df.join(
@@ -160,22 +200,36 @@ def _join_goal_aggregates(matches_df: DataFrame, events_df: DataFrame) -> DataFr
 
 def _add_rolling_features(df: DataFrame) -> DataFrame:
     """Add rolling average and standard deviation features."""
-    window_5 = Window.partitionBy("team_id").orderBy("scheduled_at").rowsBetween(
-        ROLLING_WINDOW_5_START, ROLLING_WINDOW_5_END,
+    window_5 = (
+        Window.partitionBy("team_id")
+        .orderBy("scheduled_at")
+        .rowsBetween(
+            ROLLING_WINDOW_5_START,
+            ROLLING_WINDOW_5_END,
+        )
     )
-    window_10 = Window.partitionBy("team_id").orderBy("scheduled_at").rowsBetween(
-        ROLLING_WINDOW_10_START, ROLLING_WINDOW_10_END,
+    window_10 = (
+        Window.partitionBy("team_id")
+        .orderBy("scheduled_at")
+        .rowsBetween(
+            ROLLING_WINDOW_10_START,
+            ROLLING_WINDOW_10_END,
+        )
     )
 
-    return df.withColumn(
-        "rolling_avg_goals_5",
-        F.avg("goals_scored").over(window_5),
-    ).withColumn(
-        "rolling_avg_goals_10",
-        F.avg("goals_scored").over(window_10),
-    ).withColumn(
-        "rolling_std_goals_5",
-        F.stddev("goals_scored").over(window_5),
+    return (
+        df.withColumn(
+            "rolling_avg_goals_5",
+            F.avg("goals_scored").over(window_5),
+        )
+        .withColumn(
+            "rolling_avg_goals_10",
+            F.avg("goals_scored").over(window_10),
+        )
+        .withColumn(
+            "rolling_std_goals_5",
+            F.stddev("goals_scored").over(window_5),
+        )
     )
 
 
@@ -183,15 +237,19 @@ def _add_lag_and_rest_features(df: DataFrame) -> DataFrame:
     """Add lag and rest day features."""
     team_order = Window.partitionBy("team_id").orderBy("scheduled_at")
 
-    result = df.withColumn(
-        "lag_1_goals",
-        F.lag("goals_scored", 1).over(team_order),
-    ).withColumn(
-        "lag_2_goals",
-        F.lag("goals_scored", 2).over(team_order),
-    ).withColumn(
-        "lag_3_goals",
-        F.lag("goals_scored", 3).over(team_order),
+    result = (
+        df.withColumn(
+            "lag_1_goals",
+            F.lag("goals_scored", 1).over(team_order),
+        )
+        .withColumn(
+            "lag_2_goals",
+            F.lag("goals_scored", 2).over(team_order),
+        )
+        .withColumn(
+            "lag_3_goals",
+            F.lag("goals_scored", 3).over(team_order),
+        )
     )
 
     result = result.withColumn(
@@ -231,27 +289,37 @@ def compute_odds_features(odds_df: DataFrame, matches_df: DataFrame) -> DataFram
 
     result = matches_df.join(latest_odds, "match_id", "left")
 
-    result = result.withColumn(
-        "opening_implied_prob_home",
-        F.when(F.col("opening_home_odds") > 0, 1.0 / F.col("opening_home_odds")).otherwise(0.0),
-    ).withColumn(
-        "closing_implied_prob_home",
-        F.when(F.col("closing_home_odds") > 0, 1.0 / F.col("closing_home_odds")).otherwise(0.0),
-    ).withColumn(
-        "line_movement_spread",
-        F.col("closing_home_odds") - F.col("opening_home_odds"),
-    ).withColumn(
-        "cash_ticket_divergence",
-        F.col("cash_pct_home") - F.col("ticket_pct_home"),
-    ).withColumn(
-        "reverse_line_movement",
-        F.when(
-            (F.col("line_movement_spread") > 0) & (F.col("ticket_pct_home") < TICKET_PCT_HOME_THRESHOLD),
-            1,
-        ).when(
-            (F.col("line_movement_spread") < 0) & (F.col("ticket_pct_home") > TICKET_PCT_HOME_THRESHOLD),
-            1,
-        ).otherwise(0),
+    result = (
+        result.withColumn(
+            "opening_implied_prob_home",
+            F.when(F.col("opening_home_odds") > 0, 1.0 / F.col("opening_home_odds")).otherwise(0.0),
+        )
+        .withColumn(
+            "closing_implied_prob_home",
+            F.when(F.col("closing_home_odds") > 0, 1.0 / F.col("closing_home_odds")).otherwise(0.0),
+        )
+        .withColumn(
+            "line_movement_spread",
+            F.col("closing_home_odds") - F.col("opening_home_odds"),
+        )
+        .withColumn(
+            "cash_ticket_divergence",
+            F.col("cash_pct_home") - F.col("ticket_pct_home"),
+        )
+        .withColumn(
+            "reverse_line_movement",
+            F.when(
+                (F.col("line_movement_spread") > 0)
+                & (F.col("ticket_pct_home") < TICKET_PCT_HOME_THRESHOLD),
+                1,
+            )
+            .when(
+                (F.col("line_movement_spread") < 0)
+                & (F.col("ticket_pct_home") > TICKET_PCT_HOME_THRESHOLD),
+                1,
+            )
+            .otherwise(0),
+        )
     )
 
     return result
@@ -271,17 +339,25 @@ def compute_biometric_features(
         F.avg("injury_risk").alias("team_injury_risk_score"),
     )
 
-    result = matches_df.join(
-        latest_biometrics,
-        matches_df.home_team_id == latest_biometrics.team_id,
-        "left",
-    ).withColumnRenamed("team_avg_acwr", "home_team_avg_acwr").drop("team_id")
+    result = (
+        matches_df.join(
+            latest_biometrics,
+            matches_df.home_team_id == latest_biometrics.team_id,
+            "left",
+        )
+        .withColumnRenamed("team_avg_acwr", "home_team_avg_acwr")
+        .drop("team_id")
+    )
 
-    result = result.join(
-        latest_biometrics,
-        result.away_team_id == latest_biometrics.team_id,
-        "left",
-    ).withColumnRenamed("team_avg_acwr", "away_team_avg_acwr").drop("team_id")
+    result = (
+        result.join(
+            latest_biometrics,
+            result.away_team_id == latest_biometrics.team_id,
+            "left",
+        )
+        .withColumnRenamed("team_avg_acwr", "away_team_avg_acwr")
+        .drop("team_id")
+    )
 
     return result
 
@@ -301,17 +377,25 @@ def compute_sentiment_features_df(
         F.sum("volume").alias("sentiment_volume"),
     )
 
-    result = matches_df.join(
-        latest_sentiment,
-        matches_df.home_team_id == latest_sentiment.entity_id,
-        "left",
-    ).withColumnRenamed("twitter_sentiment", "home_twitter_sentiment").drop("entity_id")
+    result = (
+        matches_df.join(
+            latest_sentiment,
+            matches_df.home_team_id == latest_sentiment.entity_id,
+            "left",
+        )
+        .withColumnRenamed("twitter_sentiment", "home_twitter_sentiment")
+        .drop("entity_id")
+    )
 
-    result = result.join(
-        latest_sentiment,
-        result.away_team_id == latest_sentiment.entity_id,
-        "left",
-    ).withColumnRenamed("twitter_sentiment", "away_twitter_sentiment").drop("entity_id")
+    result = (
+        result.join(
+            latest_sentiment,
+            result.away_team_id == latest_sentiment.entity_id,
+            "left",
+        )
+        .withColumnRenamed("twitter_sentiment", "away_twitter_sentiment")
+        .drop("entity_id")
+    )
 
     return result
 
@@ -379,7 +463,9 @@ async def process_micro_batch(batch_df: DataFrame, batch_id: int) -> None:
                 if col not in ["match_id", "home_team_id", "away_team_id", "scheduled_at"]:
                     value = row.get(col)
                     if value is not None:
-                        features[col] = float(value) if isinstance(value, (int, float)) else str(value)
+                        features[col] = (
+                            float(value) if isinstance(value, (int, float)) else str(value)
+                        )
 
             await store_writer.write_features(
                 match_id=match_id,
@@ -425,13 +511,18 @@ def run_batch_feature_computation(
                 if col not in ["match_id", "home_team_id", "away_team_id", "scheduled_at"]:
                     value = row.get(col)
                     if value is not None and not pd.isna(value):
-                        features[col] = float(value) if isinstance(value, (int, float)) else str(value)
+                        features[col] = (
+                            float(value) if isinstance(value, (int, float)) else str(value)
+                        )
 
             import asyncio
-            asyncio.run(store_writer.write_features(
-                match_id=match_id,
-                features=features,
-            ))
+
+            asyncio.run(
+                store_writer.write_features(
+                    match_id=match_id,
+                    features=features,
+                )
+            )
 
         logger.info("batch_feature_computation_complete", num_matches=len(pandas_df))
     except Exception as e:
@@ -474,7 +565,9 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Feature Engineering Pipeline")
     parser.add_argument("--mode", choices=["batch", "streaming"], default="batch")
-    parser.add_argument("--start-date", type=str, help="Start date for batch processing (YYYY-MM-DD)")
+    parser.add_argument(
+        "--start-date", type=str, help="Start date for batch processing (YYYY-MM-DD)"
+    )
     parser.add_argument("--end-date", type=str, help="End date for batch processing (YYYY-MM-DD)")
 
     args = parser.parse_args()

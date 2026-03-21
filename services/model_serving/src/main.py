@@ -18,12 +18,12 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from sports_common.logging import setup_logging, get_logger
 from sports_common.schemas.predictions import MatchPrediction
+from sports_common.security import setup_security
 
 from .betting import BettingEngine, BetSelection
 from .cache import PredictionCache
@@ -170,13 +170,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+setup_security(app)
 
 
 @app.middleware("http")
@@ -191,9 +185,7 @@ async def correlation_id_middleware(request: Request, call_next):
 
 
 @app.exception_handler(HTTPException)
-async def structured_http_exception_handler(
-    request: Request, exc: HTTPException
-) -> JSONResponse:
+async def structured_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """Return structured error JSON per RULE-19."""
     return JSONResponse(
         status_code=exc.status_code,
@@ -297,7 +289,11 @@ async def _generate_prediction(match_id: str) -> dict[str, Any]:
     """Generate prediction for a match using the loaded model."""
     if _predictor:
         raw_probs = _predictor.predict({})
-        home_win_prob, draw_prob, away_win_prob = float(raw_probs[0]), float(raw_probs[1]), float(raw_probs[2])
+        home_win_prob, draw_prob, away_win_prob = (
+            float(raw_probs[0]),
+            float(raw_probs[1]),
+            float(raw_probs[2]),
+        )
     else:
         home_win_prob = DEFAULT_HOME_WIN_PROB
         draw_prob = DEFAULT_DRAW_PROB
@@ -338,26 +334,30 @@ async def websocket_live_predictions(websocket: WebSocket, match_id: str) -> Non
     """Stream live prediction updates via WebSocket."""
     await manager.connect(match_id, websocket)
     try:
-        await websocket.send_json({
-            "type": "connection_established",
-            "match_id": match_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        await websocket.send_json(
+            {
+                "type": "connection_established",
+                "match_id": match_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         while True:
             data = await websocket.receive_text()
-            await websocket.send_json({
-                "type": "prediction_update",
-                "match_id": match_id,
-                "minute": None,
-                "trigger": "periodic",
-                "probabilities": {
-                    "home_win": DEFAULT_HOME_WIN_PROB,
-                    "draw": DEFAULT_DRAW_PROB,
-                    "away_win": DEFAULT_AWAY_WIN_PROB,
-                },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+            await websocket.send_json(
+                {
+                    "type": "prediction_update",
+                    "match_id": match_id,
+                    "minute": None,
+                    "trigger": "periodic",
+                    "probabilities": {
+                        "home_win": DEFAULT_HOME_WIN_PROB,
+                        "draw": DEFAULT_DRAW_PROB,
+                        "away_win": DEFAULT_AWAY_WIN_PROB,
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
     except WebSocketDisconnect:
         manager.disconnect(match_id, websocket)
     except Exception as e:
@@ -394,7 +394,11 @@ async def get_value_bets(
     if date and _cache:
         await _cache.set_value_bets(date, value_bets)
 
-    return {"date": date or datetime.now(timezone.utc).date().isoformat(), "value_bets": value_bets, "cached": False}
+    return {
+        "date": date or datetime.now(timezone.utc).date().isoformat(),
+        "value_bets": value_bets,
+        "cached": False,
+    }
 
 
 @app.get("/api/v1/reports/{match_id}", response_model=ReportResponse)

@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from sports_common.logging import setup_logging, get_logger
+from sports_common.security import setup_security
 
 from .health import router as health_router
 
@@ -29,6 +30,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+setup_security(app)
+
 app.include_router(health_router, prefix="/health", tags=["health"])
 
 
@@ -44,9 +47,7 @@ async def correlation_id_middleware(request: Request, call_next):
 
 
 @app.exception_handler(HTTPException)
-async def structured_http_exception_handler(
-    request: Request, exc: HTTPException
-) -> JSONResponse:
+async def structured_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """Return structured error JSON per RULE-19."""
     return JSONResponse(
         status_code=exc.status_code,

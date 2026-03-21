@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sports-config
+  namespace: sports-prediction
+data:
+  DATABASE_URL: "postgresql+asyncpg://postgres:5432/sportspred"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  REDIS_URL: "redis://redis:6379/0"
+  MLFLOW_TRACKING_URI: "http://mlflow:5000"
