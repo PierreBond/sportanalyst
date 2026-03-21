@@ -304,6 +304,11 @@ async def main() -> None:
         type=str,
         help="Output JSON file for results",
     )
+    parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Print human-readable summary to stdout (default: CI mode emits structured logs)",
+    )
 
     args = parser.parse_args()
 
@@ -328,21 +333,35 @@ async def main() -> None:
     else:
         await tester.run()
 
-    print("\n" + "=" * 60)
-    print("CHAOS TEST RESULTS")
-    print("=" * 60)
-    print(f"Total Scenarios:  {tester._results['total_scenarios']}")
-    print(f"Passed:           {tester._results['passed_scenarios']}")
-    print(f"Pass Rate:        {tester._results['pass_rate']}%")
-    print("-" * 60)
-    print("SCENARIO DETAILS")
-    print("-" * 60)
+    if args.pretty:
+        print("\n" + "=" * 60)
+        print("CHAOS TEST RESULTS")
+        print("=" * 60)
+        print(f"Total Scenarios:  {tester._results['total_scenarios']}")
+        print(f"Passed:           {tester._results['passed_scenarios']}")
+        print(f"Pass Rate:        {tester._results['pass_rate']}%")
+        print("-" * 60)
+        print("SCENARIO DETAILS")
+        print("-" * 60)
 
-    for scenario in tester._results["scenarios_run"]:
-        status = "PASS" if scenario.get("passed", False) else "FAIL"
-        print(f"  {scenario['scenario']}: {status}")
+        for scenario in tester._results["scenarios_run"]:
+            status = "PASS" if scenario.get("passed", False) else "FAIL"
+            print(f"  {scenario['scenario']}: {status}")
 
-    print("=" * 60 + "\n")
+        print("=" * 60 + "\n")
+    else:
+        logger.info(
+            "chaos_test_summary",
+            total_scenarios=tester._results["total_scenarios"],
+            passed_scenarios=tester._results["passed_scenarios"],
+            pass_rate=tester._results["pass_rate"],
+        )
+        for scenario in tester._results["scenarios_run"]:
+            logger.info(
+                "scenario_result",
+                scenario=scenario.get("scenario"),
+                passed=scenario.get("passed", False),
+            )
 
     if args.output:
         with open(args.output, "w") as f:

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import os
 import time
 from typing import Callable
 
@@ -18,6 +21,18 @@ CORS_ORIGINS = [
     "https://sports-prediction.example.com",
     "https://dashboard.sports-prediction.example.com",
 ]
+
+AUTH_BYPASS_PATHS = frozenset(
+    [
+        "/health",
+        "/health/",
+        "/health/ready",
+        "/health/live",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    ]
+)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -64,15 +79,63 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def setup_security(app: FastAPI) -> None:
+class ApiKeyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if request.url.path in AUTH_BYPASS_PATHS or request.url.path.startswith("/health"):
+            return await call_next(request)
+
+        api_key = os.environ.get("API_KEY", "")
+        provided_key = request.headers.get("X-API-Key", "")
+
+        if not api_key:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Service not configured",
+                    "detail": "API_KEY environment variable is not set on this server",
+                    "code": 503,
+                },
+            )
+
+        if not provided_key:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "Unauthorized",
+                    "detail": "Missing X-API-Key header",
+                    "code": 401,
+                },
+            )
+
+        key_valid = hmac.compare_digest(provided_key, api_key) or hmac.compare_digest(
+            hashlib.sha256(provided_key.encode()).hexdigest(),
+            hashlib.sha256(api_key.encode()).hexdigest(),
+        )
+
+        if not key_valid:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "Unauthorized",
+                    "detail": "Invalid API key",
+                    "code": 401,
+                },
+            )
+
+        return await call_next(request)
+
+
+def setup_security(app: FastAPI, require_auth: bool = True) -> None:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-API-Key"],
         max_age=600,
     )
 
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    if require_auth:
+        app.add_middleware(ApiKeyMiddleware)

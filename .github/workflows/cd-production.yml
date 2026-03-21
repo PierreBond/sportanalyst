@@ -107,11 +107,19 @@ jobs:
             kubectl apply -f infra/k8s/services/$svc/hpa.yml || true
           done
 
+      - name: Rolling update — api-gateway
+        run: |
+          kubectl apply -f infra/k8s/services/api-gateway/configmap.yml
+          kubectl apply -f infra/k8s/services/api-gateway/deployment.yml
+          kubectl apply -f infra/k8s/services/api-gateway/service.yml
+          kubectl apply -f infra/k8s/services/api-gateway/hpa.yml || true
+
       - name: Rolling update — image pull
         run: |
           for svc in ingestion feature-engine model-serving model-training nlp-service biometric-service reporting-service; do
             kubectl rollout status deployment/$svc -n ${{ env.NAMESPACE }} --timeout=300s
           done
+          kubectl rollout status deployment/api-gateway -n ${{ env.NAMESPACE }} --timeout=120s || true
 
       - name: Smoke test after deploy
         run: |

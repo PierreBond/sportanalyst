@@ -8,3 +8,13 @@ data:
   KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
   REDIS_URL: "redis://redis:6379/0"
   MLFLOW_TRACKING_URI: "http://mlflow:5000"
+---
+# API_KEY must be provided via a Kubernetes Secret, e.g.:
+#   kubectl create secret generic sports-api-key --from-literal=API_KEY=<your-key>
+# Then reference it in each deployment as:
+#   env:
+#     - name: API_KEY
+#       valueFrom:
+#         secretKeyRef:
+#           name: sports-api-key
+#           key: API_KEY

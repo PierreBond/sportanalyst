@@ -11,8 +11,13 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 database_url = os.environ.get("DATABASE_URL_SYNC")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+if not database_url:
+    raise RuntimeError(
+        "DATABASE_URL_SYNC environment variable is required to run migrations. "
+        "Set it to your PostgreSQL connection string, e.g.: "
+        "export DATABASE_URL_SYNC=postgresql://user:pass@localhost:5432/sportspred"
+    )
+config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = None
 

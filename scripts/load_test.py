@@ -211,6 +211,11 @@ async def main() -> None:
         type=str,
         help="Output JSON file for results",
     )
+    parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Print human-readable summary to stdout (default: CI mode emits structured logs)",
+    )
 
     args = parser.parse_args()
 
@@ -223,24 +228,40 @@ async def main() -> None:
 
     results = await tester.run()
 
-    print("\n" + "=" * 60)
-    print("LOAD TEST RESULTS")
-    print("=" * 60)
-    print(f"Duration:        {results['elapsed_seconds']}s")
-    print(f"Total Requests:  {results['total_requests']}")
-    print(f"Successful:      {results['successful_requests']}")
-    print(f"Failed:          {results['failed_requests']}")
-    print(f"Success Rate:    {results['success_rate']}%")
-    print(f"Actual RPS:      {results['actual_rps']}")
-    print("-" * 60)
-    print("LATENCY")
-    print("-" * 60)
-    print(f"Average:         {results.get('latency_avg', 'N/A')}ms")
-    print(f"p50:             {results.get('latency_p50', 'N/A')}ms")
-    print(f"p95:             {results.get('latency_p95', 'N/A')}ms")
-    print(f"p99:             {results.get('latency_p99', 'N/A')}ms")
-    print(f"Max:             {results.get('latency_max', 'N/A')}ms")
-    print("=" * 60 + "\n")
+    if args.pretty:
+        print("\n" + "=" * 60)
+        print("LOAD TEST RESULTS")
+        print("=" * 60)
+        print(f"Duration:        {results['elapsed_seconds']}s")
+        print(f"Total Requests:  {results['total_requests']}")
+        print(f"Successful:      {results['successful_requests']}")
+        print(f"Failed:          {results['failed_requests']}")
+        print(f"Success Rate:    {results['success_rate']}%")
+        print(f"Actual RPS:      {results['actual_rps']}")
+        print("-" * 60)
+        print("LATENCY")
+        print("-" * 60)
+        print(f"Average:         {results.get('latency_avg', 'N/A')}ms")
+        print(f"p50:             {results.get('latency_p50', 'N/A')}ms")
+        print(f"p95:             {results.get('latency_p95', 'N/A')}ms")
+        print(f"p99:             {results.get('latency_p99', 'N/A')}ms")
+        print(f"Max:             {results.get('latency_max', 'N/A')}ms")
+        print("=" * 60 + "\n")
+    else:
+        logger.info(
+            "load_test_summary",
+            elapsed_seconds=results["elapsed_seconds"],
+            total_requests=results["total_requests"],
+            successful_requests=results["successful_requests"],
+            failed_requests=results["failed_requests"],
+            success_rate=results["success_rate"],
+            actual_rps=results["actual_rps"],
+            latency_avg=results.get("latency_avg"),
+            latency_p50=results.get("latency_p50"),
+            latency_p95=results.get("latency_p95"),
+            latency_p99=results.get("latency_p99"),
+            latency_max=results.get("latency_max"),
+        )
 
     if args.output:
         with open(args.output, "w") as f:

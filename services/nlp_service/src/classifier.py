@@ -6,7 +6,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from sports_common.logging import get_logger
-from preprocessing import TextPreprocessor
+from .preprocessing import TextPreprocessor
 
 logger = get_logger(__name__)
 
@@ -42,9 +42,7 @@ class SentimentClassifier:
     def model(self) -> AutoModelForSequenceClassification:
         if self._model is None:
             logger.info("loading_model", model=self._model_name, device=self._device)
-            self._model = AutoModelForSequenceClassification.from_pretrained(
-                self._model_name
-            )
+            self._model = AutoModelForSequenceClassification.from_pretrained(self._model_name)
             self._model.to(self._device)
             self._model.eval()
         return self._model
@@ -148,12 +146,14 @@ class SentimentClassifier:
             else:
                 label = "neutral"
 
-            results.append({
-                "text": text[:100],
-                "score": round(score, 4),
-                "confidence": round(conf, 4),
-                "label": label,
-            })
+            results.append(
+                {
+                    "text": text[:100],
+                    "score": round(score, 4),
+                    "confidence": round(conf, 4),
+                    "label": label,
+                }
+            )
 
         return results
 

@@ -53,7 +53,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-setup_security(app)
+setup_security(app, require_auth=False)
 
 
 @app.middleware("http")

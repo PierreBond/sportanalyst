@@ -246,28 +246,44 @@ async def main() -> None:
         type=str,
         help="Output JSON file for results",
     )
+    parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Print human-readable summary to stdout (default: CI mode emits structured logs)",
+    )
 
     args = parser.parse_args()
 
     tester = E2ETest(base_url=args.url)
     results = await tester.run_all_tests()
 
-    print("\n" + "=" * 60)
-    print("E2E TEST RESULTS")
-    print("=" * 60)
-    print(f"Total Tests:      {len(results['tests'])}")
-    print(f"Passed:           {results['passed']}")
-    print(f"Failed:          {results['failed']}")
-    print(f"Pass Rate:        {results['pass_rate']}%")
-    print("-" * 60)
-    print("TEST DETAILS")
-    print("-" * 60)
+    if args.pretty:
+        print("\n" + "=" * 60)
+        print("E2E TEST RESULTS")
+        print("=" * 60)
+        print(f"Total Tests:      {len(results['tests'])}")
+        print(f"Passed:           {results['passed']}")
+        print(f"Failed:          {results['failed']}")
+        print(f"Pass Rate:        {results['pass_rate']}%")
+        print("-" * 60)
+        print("TEST DETAILS")
+        print("-" * 60)
 
-    for test in results["tests"]:
-        status = "PASS" if test["passed"] else "FAIL"
-        print(f"  {test['name']}: {status}")
+        for test in results["tests"]:
+            status = "PASS" if test["passed"] else "FAIL"
+            print(f"  {test['name']}: {status}")
 
-    print("=" * 60 + "\n")
+        print("=" * 60 + "\n")
+    else:
+        logger.info(
+            "e2e_test_summary",
+            total_tests=len(results["tests"]),
+            passed=results["passed"],
+            failed=results["failed"],
+            pass_rate=results["pass_rate"],
+        )
+        for test in results["tests"]:
+            logger.info("test_result", name=test["name"], passed=test["passed"])
 
     if args.output:
         with open(args.output, "w") as f:

@@ -1,0 +1,128 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: sports-prediction
+data:
+  nginx.conf: |
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+
+      log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+      access_log /var/log/nginx/access.log main;
+
+      sendfile on;
+      tcp_nopush on;
+      keepalive_timeout 65;
+      gzip on;
+
+      upstream ingestion {
+        server ingestion.sports-prediction.svc.cluster.local:8001;
+      }
+
+      upstream nlp {
+        server nlp-service.sports-prediction.svc.cluster.local:8002;
+      }
+
+      upstream biometric {
+        server biometric-service.sports-prediction.svc.cluster.local:8003;
+      }
+
+      upstream model_serving {
+        server model-serving.sports-prediction.svc.cluster.local:8004;
+      }
+
+      upstream reporting {
+        server reporting-service.sports-prediction.svc.cluster.local:8005;
+      }
+
+      server {
+        listen 80;
+        server_name _;
+
+        # Health check
+        location /health {
+          return 200 'gateway healthy\n';
+          add_header Content-Type text/plain;
+        }
+
+        # Data ingestion
+        location /api/ingestion/ {
+          proxy_pass http://ingestion/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # NLP / Sentiment
+        location /api/nlp/ {
+          proxy_pass http://nlp/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Biometrics
+        location /api/biometric/ {
+          proxy_pass http://biometric/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Model predictions
+        location /api/predictions/ {
+          proxy_pass http://model_serving/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location /api/value-bets {
+          proxy_pass http://model_serving/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location /api/models {
+          proxy_pass http://model_serving/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Reports
+        location /api/reports/ {
+          proxy_pass http://reporting/;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Default: 404
+        location / {
+          return 404 '{"error": "Not found", "code": 404}';
+          add_header Content-Type application/json;
+        }
+      }
+    }

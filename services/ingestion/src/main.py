@@ -30,7 +30,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-setup_security(app)
+setup_security(app, require_auth=False)
 
 app.include_router(health_router, prefix="/health", tags=["health"])
 

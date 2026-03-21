@@ -223,6 +223,11 @@ async def main() -> None:
         default=-0.05,
         help="CLV threshold for retraining",
     )
+    parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Output human-readable JSON to stdout (default: compact JSON for CI)",
+    )
 
     args = parser.parse_args()
 
@@ -235,19 +240,21 @@ async def main() -> None:
     if args.check_only:
         metrics = await trigger.check_model_metrics()
         should_train, reason = trigger.should_retrain(metrics)
-        print(
-            json.dumps(
-                {
-                    "metrics": metrics,
-                    "should_retrain": should_train,
-                    "reason": reason,
-                },
-                indent=2,
-            )
-        )
+        payload = {
+            "metrics": metrics,
+            "should_retrain": should_train,
+            "reason": reason,
+        }
+        if args.pretty:
+            print(json.dumps(payload, indent=2))
+        else:
+            logger.info("retrain_check", **payload)
     else:
         result = await trigger.run_automated_retrain()
-        print(json.dumps(result, indent=2))
+        if args.pretty:
+            print(json.dumps(result, indent=2))
+        else:
+            logger.info("retrain_complete", **result)
 
 
 if __name__ == "__main__":
