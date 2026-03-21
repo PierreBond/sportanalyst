@@ -9,11 +9,12 @@ from typing import Any
 import structlog
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "libs"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "alembic"))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from alembic.models import FeatureStore, Match
+from models import FeatureStore, Match
 from sports_common.config import settings
 from sports_common.kafka_client import KafkaProducerWrapper
 from sports_common.schemas.features import FeatureVector
