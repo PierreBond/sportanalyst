@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from sports_common.logging import get_logger
-from .preprocessing import TextPreprocessor
+from preprocessing import TextPreprocessor
 
 logger = get_logger(__name__)
 
@@ -40,11 +40,16 @@ class SentimentClassifier:
         device: str | None = None,
     ) -> None:
         self._model_name = model_name
-        torch = _get_torch()
-        self._device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self._device = device
         self._tokenizer = None
         self._model = None
         self._preprocessor = TextPreprocessor()
+
+    def _resolve_device(self) -> str:
+        if self._device is None:
+            torch = _get_torch()
+            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        return self._device
 
     @property
     def tokenizer(self) -> Any:
@@ -58,11 +63,11 @@ class SentimentClassifier:
     @property
     def model(self) -> Any:
         if self._model is None:
-            logger.info("loading_model", model=self._model_name, device=self._device)
+            logger.info("loading_model", model=self._model_name, device=self._resolve_device())
             from transformers import AutoModelForSequenceClassification
 
             self._model = AutoModelForSequenceClassification.from_pretrained(self._model_name)
-            self._model.to(self._device)
+            self._model.to(self._resolve_device())
             self._model.eval()
         return self._model
 
@@ -89,7 +94,7 @@ class SentimentClassifier:
             max_length=256,
             return_tensors="pt",
         )
-        inputs = {k: v.to(self._device) for k, v in inputs.items()}
+        inputs = {k: v.to(self._resolve_device()) for k, v in inputs.items()}
         torch = _get_torch()
 
         with torch.no_grad():
@@ -98,7 +103,7 @@ class SentimentClassifier:
         logits = outputs.logits
         probs = torch.softmax(logits, dim=-1)
 
-        stars = torch.arange(1, 6, dtype=torch.float32, device=self._device)
+        stars = torch.arange(1, 6, dtype=torch.float32, device=self._resolve_device())
         weighted = (probs * stars).sum(dim=-1)
 
         normalized = (weighted - 3.0) / 2.0
@@ -140,7 +145,7 @@ class SentimentClassifier:
             max_length=256,
             return_tensors="pt",
         )
-        inputs = {k: v.to(self._device) for k, v in inputs.items()}
+        inputs = {k: v.to(self._resolve_device()) for k, v in inputs.items()}
         torch = _get_torch()
 
         with torch.no_grad():
@@ -149,7 +154,7 @@ class SentimentClassifier:
         logits = outputs.logits
         probs = torch.softmax(logits, dim=-1)
 
-        stars = torch.arange(1, 6, dtype=torch.float32, device=self._device)
+        stars = torch.arange(1, 6, dtype=torch.float32, device=self._resolve_device())
         weighted = (probs * stars).sum(dim=-1)
         normalized = (weighted - 3.0) / 2.0
 

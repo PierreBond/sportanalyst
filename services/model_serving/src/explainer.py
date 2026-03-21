@@ -6,7 +6,22 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import shap
+
+_shap: Any = None
+
+
+def _get_shap() -> Any:
+    global _shap
+    if _shap is None:
+        try:
+            import shap as _s
+
+            _shap = _s
+        except ImportError:
+            raise RuntimeError(
+                "shap is required for PredictionExplainer. Install it with: pip install shap"
+            )
+    return _shap
 
 
 class PredictionExplainer:
@@ -32,7 +47,7 @@ class PredictionExplainer:
         self.model = model
         self.background_data = background_data
         self.feature_names = feature_names or list(background_data.columns)
-        self._explainer: shap.Explainer | None = None
+        self._explainer: Any = None
         self._background_cache: pd.DataFrame | None = None
 
         self._init_explainer()
@@ -40,9 +55,7 @@ class PredictionExplainer:
     def _init_explainer(self) -> None:
         """Initialize the SHAP explainer."""
         try:
-            self._explainer = shap.Explainer(
-                self._predict_wrapper, self.background_data
-            )
+            self._explainer = _get_shap().Explainer(self._predict_wrapper, self.background_data)
         except (TypeError, ValueError, AttributeError) as e:
             raise ValueError(f"Failed to initialize SHAP explainer: {e}") from e
 
@@ -90,16 +103,12 @@ class PredictionExplainer:
                     for j, col in enumerate(X.columns)
                 }
 
-            sorted_shap = dict(
-                sorted(feature_shap.items(), key=lambda x: abs(x[1]), reverse=True)
-            )
+            sorted_shap = dict(sorted(feature_shap.items(), key=lambda x: abs(x[1]), reverse=True))
             results.append(sorted_shap)
 
         return results
 
-    def explain_single(
-        self, X: pd.DataFrame
-    ) -> dict[str, float]:
+    def explain_single(self, X: pd.DataFrame) -> dict[str, float]:
         """Compute SHAP values for a single prediction.
 
         Args:
@@ -127,9 +136,7 @@ class PredictionExplainer:
             List of (feature_name, shap_value) tuples.
         """
         shap_dict = self.explain_single(X)
-        sorted_features = sorted(
-            shap_dict.items(), key=lambda x: abs(x[1]), reverse=True
-        )
+        sorted_features = sorted(shap_dict.items(), key=lambda x: abs(x[1]), reverse=True)
         return sorted_features[:top_k]
 
     def format_explanation(
@@ -224,9 +231,7 @@ class PredictionExplainer:
         }
         path.write_text(json.dumps(state))
 
-    def compute_shap_interaction_values(
-        self, X: pd.DataFrame
-    ) -> np.ndarray:
+    def compute_shap_interaction_values(self, X: pd.DataFrame) -> np.ndarray:
         """Compute SHAP interaction values between features.
 
         Args:
@@ -274,6 +279,4 @@ class PredictionExplainer:
             if i != feature_idx
         ]
 
-        return sorted(feature_interactions, key=lambda x: abs(x[1]), reverse=True)[
-            :top_k
-        ]
+        return sorted(feature_interactions, key=lambda x: abs(x[1]), reverse=True)[:top_k]

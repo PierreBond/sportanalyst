@@ -25,11 +25,11 @@ from sports_common.logging import setup_logging, get_logger
 from sports_common.schemas.predictions import MatchPrediction
 from sports_common.security import setup_security
 
-from .betting import BettingEngine, BetSelection
-from .cache import PredictionCache
-from .calibrator import ProbabilityCalibrator
-from .explainer import PredictionExplainer
-from .predictor import ModelPredictor
+from betting import BettingEngine, BetSelection
+from cache import PredictionCache
+from calibrator import ProbabilityCalibrator
+from explainer import PredictionExplainer
+from predictor import ModelPredictor
 
 setup_logging("model-serving")
 logger = get_logger(__name__)

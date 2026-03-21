@@ -11,7 +11,7 @@ class SentimentResult(BaseModel):
 
     sentiment_id: UUID | None = None
     entity_type: str
-    entity_id: UUID
+    entity_id: str
     source: str
     score: float
     volume: int = 0
@@ -47,7 +47,7 @@ class RawTextPayload(BaseModel):
 class AggregatedSentiment(BaseModel):
     model_config = {"extra": "ignore"}
 
-    entity_id: UUID
+    entity_id: str
     entity_type: str
     twitter_sentiment: float | None = None
     reddit_sentiment: float | None = None

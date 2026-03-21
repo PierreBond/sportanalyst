@@ -22,7 +22,7 @@ class MatchPrediction(BaseModel):
     model_config = {"extra": "ignore"}
 
     prediction_id: UUID | None = None
-    match_id: UUID
+    match_id: str
     model_name: str
     model_version: str
     predicted_at: datetime = Field(default_factory=datetime.utcnow)
@@ -39,7 +39,7 @@ class MatchPrediction(BaseModel):
 class BettingRecommendation(BaseModel):
     model_config = {"extra": "ignore"}
 
-    match_id: UUID
+    match_id: str
     model_name: str
     market_type: str
     selection: str
@@ -57,7 +57,7 @@ class ValueBet(BaseModel):
     model_config = {"extra": "ignore"}
 
     bet_id: UUID | None = None
-    match_id: UUID
+    match_id: str
     model_name: str
     sportsbook: str
     market_type: str
