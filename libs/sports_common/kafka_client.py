@@ -1,18 +1,28 @@
 from __future__ import annotations
 
-import asyncio
 import json
-from typing import Any, AsyncIterator, Callable
+from typing import Any, Any
 
 import structlog
-from kafka import KafkaConsumer, KafkaProducer
-from kafka.admin import KafkaAdminClient, NewTopic
-from kafka.errors import TopicAlreadyExistsError
 
 from sports_common.config import settings
 from sports_common.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _get_kafka_modules() -> Any:
+    """Lazily import kafka modules, raising a helpful error if absent."""
+    try:
+        from kafka import KafkaConsumer, KafkaProducer
+        from kafka.admin import KafkaAdminClient, NewTopic
+        from kafka.errors import TopicAlreadyExistsError
+
+        return KafkaConsumer, KafkaProducer, KafkaAdminClient, NewTopic, TopicAlreadyExistsError
+    except ImportError:
+        raise RuntimeError(
+            "kafka-python is required for KafkaClient. Install it with: pip install kafka-python"
+        )
 
 
 class JSONSerializer:
@@ -33,12 +43,13 @@ class KafkaClient:
     ) -> None:
         self._bootstrap_servers = bootstrap_servers or settings.kafka_bootstrap_servers
         self._consumer_group = consumer_group or settings.kafka_consumer_group
-        self._producer: KafkaProducer | None = None
-        self._admin_client: KafkaAdminClient | None = None
+        self._producer: Any = None
+        self._admin_client: Any = None
 
     @property
-    def producer(self) -> KafkaProducer:
+    def producer(self) -> Any:
         if self._producer is None:
+            _, KafkaProducer, _, _, _ = _get_kafka_modules()
             self._producer = KafkaProducer(
                 bootstrap_servers=self._bootstrap_servers,
                 value_serializer=JSONSerializer.serialize,
@@ -49,8 +60,9 @@ class KafkaClient:
         return self._producer
 
     @property
-    def admin_client(self) -> KafkaAdminClient:
+    def admin_client(self) -> Any:
         if self._admin_client is None:
+            _, _, KafkaAdminClient, _, _ = _get_kafka_modules()
             self._admin_client = KafkaAdminClient(
                 bootstrap_servers=self._bootstrap_servers,
                 client_id="sports-prediction-admin",
@@ -58,6 +70,7 @@ class KafkaClient:
         return self._admin_client
 
     def create_topics(self, topics: list[str], num_partitions: int = 3) -> None:
+        _, _, _, NewTopic, TopicAlreadyExistsError = _get_kafka_modules()
         new_topics = []
         for topic in topics:
             new_topics.append(
@@ -114,10 +127,11 @@ class AsyncKafkaConsumer:
         self._bootstrap_servers = bootstrap_servers or settings.kafka_bootstrap_servers
         self._consumer_group = consumer_group or settings.kafka_consumer_group
         self._topics = topics
-        self._consumer: KafkaConsumer | None = None
+        self._consumer: Any = None
 
-    def _get_consumer(self) -> KafkaConsumer:
+    def _get_consumer(self) -> Any:
         if self._consumer is None:
+            KafkaConsumer, _, _, _, _ = _get_kafka_modules()
             self._consumer = KafkaConsumer(
                 *self._topics,
                 bootstrap_servers=self._bootstrap_servers,
@@ -129,7 +143,7 @@ class AsyncKafkaConsumer:
             )
         return self._consumer
 
-    def consume(self) -> AsyncIterator[dict[str, Any]]:
+    def consume(self) -> Any:
         consumer = self._get_consumer()
         while True:
             try:
@@ -151,7 +165,7 @@ class AsyncKafkaConsumer:
 
     async def consume_messages(
         self,
-        handler: Callable[[dict[str, Any]], Any],
+        handler: Any,
     ) -> None:
         for message in self.consume():
             try:
@@ -166,11 +180,12 @@ class KafkaProducerWrapper:
         bootstrap_servers: str | None = None,
     ) -> None:
         self._bootstrap_servers = bootstrap_servers or settings.kafka_bootstrap_servers
-        self._producer: KafkaProducer | None = None
+        self._producer: Any = None
 
     @property
-    def producer(self) -> KafkaProducer:
+    def producer(self) -> Any:
         if self._producer is None:
+            _, KafkaProducer, _, _, _ = _get_kafka_modules()
             self._producer = KafkaProducer(
                 bootstrap_servers=self._bootstrap_servers,
                 value_serializer=JSONSerializer.serialize,

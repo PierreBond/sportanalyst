@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import structlog
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "libs"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
@@ -208,6 +213,7 @@ class FeatureStoreWriter:
             self._kafka_producer.close()
         if self._engine:
             import asyncio
+
             try:
                 asyncio.get_event_loop().run_until_complete(self._engine.dispose())
             except RuntimeError:

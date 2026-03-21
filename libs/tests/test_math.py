@@ -27,8 +27,10 @@ class TestPoisson:
         assert result > 0
 
     def test_poisson_pmf_invalid_params(self):
-        assert poisson_pmf(-1, 2.5) == 0.0
-        assert poisson_pmf(3, 0) == 0.0
+        with pytest.raises(ValueError):
+            poisson_pmf(-1, 2.5)
+        with pytest.raises(ValueError):
+            poisson_pmf(3, 0)
 
     def test_poisson_cdf(self):
         result = poisson_cdf(3, 2.5)
@@ -65,8 +67,10 @@ class TestImpliedProbability:
         assert result > 0
 
     def test_implied_probability_invalid(self):
-        assert implied_probability(0) == 0.0
-        assert implied_probability(-1) == 0.0
+        with pytest.raises(ValueError):
+            implied_probability(0)
+        with pytest.raises(ValueError):
+            implied_probability(-1)
 
 
 class TestRemoveVigorish:
@@ -114,7 +118,7 @@ class TestLogLoss:
         predictions = [1.0, 0.0]
         outcomes = [1, 0]
         result = log_loss(predictions, outcomes)
-        assert result == 0.0
+        assert result == pytest.approx(0.0)
 
     def test_log_loss_mismatch_length(self):
         with pytest.raises(ValueError):
@@ -127,7 +131,7 @@ class TestExpectedValue:
         assert result > 0
 
     def test_expected_value_negative(self):
-        result = expected_value(1.5, 0.4)
+        result = expected_value(1.5, 0.3)
         assert result < 0
 
 

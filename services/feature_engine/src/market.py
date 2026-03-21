@@ -68,10 +68,12 @@ def compute_line_movement(
     opening = df.groupby(match_id_col)[odds_col].first()
     closing = df.groupby(match_id_col)[odds_col].last()
 
-    movement = pd.DataFrame({
-        "opening_odds": opening,
-        "closing_odds": closing,
-    })
+    movement = pd.DataFrame(
+        {
+            "opening_odds": opening,
+            "closing_odds": closing,
+        }
+    )
     movement["line_movement"] = movement["closing_odds"] - movement["opening_odds"]
 
     return movement
@@ -87,9 +89,7 @@ def compute_cash_ticket_divergence(
     result = pd.DataFrame()
     result["cash_pct_home"] = latest["cash_pct_home"]
     result["ticket_pct_home"] = latest["ticket_pct_home"]
-    result["cash_ticket_divergence"] = (
-        result["cash_pct_home"] - result["ticket_pct_home"]
-    )
+    result["cash_ticket_divergence"] = result["cash_pct_home"] - result["ticket_pct_home"]
 
     return result
 
@@ -99,11 +99,12 @@ def detect_reverse_line_movement(
     match_id_col: str = "match_id",
 ) -> pd.Series:
     """Detect reverse line movement (RLM) - line moved opposite to ticket majority."""
-    latest = df.sort_values(match_id_col).groupby(match_id_col).last()
+    df = df.sort_values(match_id_col)
+    latest = df.groupby(match_id_col).last()
+    opening = df.groupby(match_id_col)["home_odds"].first()
+    latest["line_movement"] = latest["home_odds"] - opening
 
-    rlm = (
-        (latest["line_movement"] > 0) & (latest["ticket_pct_home"] < 0.5)
-    ) | (
+    rlm = ((latest["line_movement"] > 0) & (latest["ticket_pct_home"] < 0.5)) | (
         (latest["line_movement"] < 0) & (latest["ticket_pct_home"] > 0.5)
     )
 

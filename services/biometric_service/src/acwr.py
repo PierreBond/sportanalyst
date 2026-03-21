@@ -5,9 +5,9 @@ from typing import Any
 
 import pandas as pd
 
-from sports_common.logging import get_logger
+import structlog
 
-logger = get_logger(__name__)
+logger = structlog.get_logger(__name__)
 
 ACUTE_WINDOW_DAYS = 7
 CHRONIC_WINDOW_DAYS = 28
@@ -41,14 +41,8 @@ def compute_acwr(
     df["recorded_at"] = pd.to_datetime(df["recorded_at"])
     df = df.sort_values("recorded_at")
 
-    acute_data = df[
-        (df["recorded_at"] >= acute_start)
-        & (df["recorded_at"] <= as_of_utc)
-    ]
-    chronic_data = df[
-        (df["recorded_at"] >= chronic_start)
-        & (df["recorded_at"] <= as_of_utc)
-    ]
+    acute_data = df[(df["recorded_at"] >= acute_start) & (df["recorded_at"] <= as_of_utc)]
+    chronic_data = df[(df["recorded_at"] >= chronic_start) & (df["recorded_at"] <= as_of_utc)]
 
     acute_load = acute_data["value"].sum()
     chronic_periods = CHRONIC_WINDOW_DAYS / ACUTE_WINDOW_DAYS
@@ -115,13 +109,15 @@ def compute_rolling_acwr(
             workload_data,
             date,
         )
-        results.append({
-            "date": date,
-            "acwr": acwr,
-            "acute_load": round(acute_load, 2),
-            "chronic_load": round(chronic_avg, 2),
-            "status": get_acwr_status(acwr),
-            "is_danger_zone": is_danger_zone(acwr),
-        })
+        results.append(
+            {
+                "date": date,
+                "acwr": acwr,
+                "acute_load": round(acute_load, 2),
+                "chronic_load": round(chronic_avg, 2),
+                "status": get_acwr_status(acwr),
+                "is_danger_zone": is_danger_zone(acwr),
+            }
+        )
 
     return results

@@ -2,15 +2,29 @@ from __future__ import annotations
 
 from typing import Any
 
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
 from sports_common.logging import get_logger
 from .preprocessing import TextPreprocessor
 
 logger = get_logger(__name__)
 
 DEFAULT_MODEL = "nlptown/bert-base-multilingual-uncased-sentiment"
+
+_torch: Any = None
+
+
+def _get_torch() -> Any:
+    """Lazily import torch, raising a helpful error if absent."""
+    global _torch
+    if _torch is None:
+        try:
+            import torch as _t
+
+            _torch = _t
+        except ImportError:
+            raise RuntimeError(
+                "torch is required for SentimentClassifier. Install it with: pip install torch"
+            )
+    return _torch
 
 
 class SentimentClassifier:
@@ -26,22 +40,27 @@ class SentimentClassifier:
         device: str | None = None,
     ) -> None:
         self._model_name = model_name
+        torch = _get_torch()
         self._device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._tokenizer = None
         self._model = None
         self._preprocessor = TextPreprocessor()
 
     @property
-    def tokenizer(self) -> AutoTokenizer:
+    def tokenizer(self) -> Any:
         if self._tokenizer is None:
             logger.info("loading_tokenizer", model=self._model_name)
+            from transformers import AutoTokenizer
+
             self._tokenizer = AutoTokenizer.from_pretrained(self._model_name)
         return self._tokenizer
 
     @property
-    def model(self) -> AutoModelForSequenceClassification:
+    def model(self) -> Any:
         if self._model is None:
             logger.info("loading_model", model=self._model_name, device=self._device)
+            from transformers import AutoModelForSequenceClassification
+
             self._model = AutoModelForSequenceClassification.from_pretrained(self._model_name)
             self._model.to(self._device)
             self._model.eval()
@@ -71,6 +90,7 @@ class SentimentClassifier:
             return_tensors="pt",
         )
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
+        torch = _get_torch()
 
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -121,6 +141,7 @@ class SentimentClassifier:
             return_tensors="pt",
         )
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
+        torch = _get_torch()
 
         with torch.no_grad():
             outputs = self.model(**inputs)

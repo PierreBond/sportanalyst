@@ -22,7 +22,7 @@ def poisson_pmf(k: int, lam: float) -> float:
     """
     if lam <= 0 or k < 0:
         raise ValueError("lam must be positive and k must be non-negative")
-    return (lam**k * math.exp(-lam)) / math.factorial(k)
+    return math.exp(k * math.log(lam) - lam - math.lgamma(k + 1))
 
 
 def poisson_cdf(k: int, lam: float) -> float:
@@ -59,7 +59,12 @@ def kelly_fraction(odds: float, probability: float) -> float:
     Returns:
         Optimal fraction of bankroll to bet (0 if no edge exists).
         Capped between 0 and 1.
+
+    Raises:
+        ValueError: If odds <= 1 or probability not in [0, 1].
     """
+    if odds <= 1:
+        raise ValueError("odds must be greater than 1")
     b = odds - 1
     q = 1 - probability
     f = (b * probability - q) / b

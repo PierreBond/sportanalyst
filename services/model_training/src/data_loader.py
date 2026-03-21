@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import structlog
-import yaml
 from sqlalchemy import select, and_
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -41,13 +40,17 @@ class DataLoader:
         """Load feature configuration from YAML."""
         if config_path is None:
             config_path = (
-                Path(__file__).parent.parent
-                / "feature_engine"
-                / "configs"
-                / "features.yaml"
+                Path(__file__).parent.parent / "feature_engine" / "configs" / "features.yaml"
             )
 
         if Path(config_path).exists():
+            try:
+                import yaml
+            except ImportError:
+                raise RuntimeError(
+                    "PyYAML is required for loading feature config. "
+                    "Install it with: pip install pyyaml"
+                )
             with open(config_path) as f:
                 return yaml.safe_load(f)
         return {}
@@ -73,9 +76,7 @@ class DataLoader:
     ) -> pd.DataFrame:
         """Load features from feature store with optional filters."""
         async with get_async_session() as session:
-            query = select(FeatureStore, Match).join(
-                Match, FeatureStore.match_id == Match.match_id
-            )
+            query = select(FeatureStore, Match).join(Match, FeatureStore.match_id == Match.match_id)
 
             conditions = []
             if leagues:
@@ -127,19 +128,36 @@ class DataLoader:
             return df
 
         feature_cols = [
-            c for c in df.columns
-            if c not in [
-                "match_id", "scheduled_at", "league", "season",
-                "home_team_id", "away_team_id", "home_score", "away_score"
+            c
+            for c in df.columns
+            if c
+            not in [
+                "match_id",
+                "scheduled_at",
+                "league",
+                "season",
+                "home_team_id",
+                "away_team_id",
+                "home_score",
+                "away_score",
             ]
         ]
 
         filtered_cols = [c for c in feature_cols if c not in self._excluded_features]
 
-        result = df[[
-            "match_id", "scheduled_at", "league", "season",
-            "home_team_id", "away_team_id", "home_score", "away_score"
-        ] + filtered_cols].copy()
+        result = df[
+            [
+                "match_id",
+                "scheduled_at",
+                "league",
+                "season",
+                "home_team_id",
+                "away_team_id",
+                "home_score",
+                "away_score",
+            ]
+            + filtered_cols
+        ].copy()
 
         logger.info(
             "features_filtered",
@@ -161,10 +179,18 @@ class DataLoader:
         result = df.copy()
 
         feature_cols = [
-            c for c in df.columns
-            if c not in [
-                "match_id", "scheduled_at", "league", "season",
-                "home_team_id", "away_team_id", "home_score", "away_score"
+            c
+            for c in df.columns
+            if c
+            not in [
+                "match_id",
+                "scheduled_at",
+                "league",
+                "season",
+                "home_team_id",
+                "away_team_id",
+                "home_score",
+                "away_score",
             ]
         ]
 
@@ -254,9 +280,12 @@ class DataLoader:
         test_season: str | None = None,
         impute: bool = True,
     ) -> tuple[
-        pd.DataFrame, pd.Series | None,
-        pd.DataFrame, pd.Series | None,
-        pd.DataFrame, pd.Series | None,
+        pd.DataFrame,
+        pd.Series | None,
+        pd.DataFrame,
+        pd.Series | None,
+        pd.DataFrame,
+        pd.Series | None,
     ]:
         """Load and prepare training data with chronological split.
 
@@ -284,10 +313,18 @@ class DataLoader:
         )
 
         feature_cols = [
-            c for c in df.columns
-            if c not in [
-                "match_id", "scheduled_at", "league", "season",
-                "home_team_id", "away_team_id", "home_score", "away_score"
+            c
+            for c in df.columns
+            if c
+            not in [
+                "match_id",
+                "scheduled_at",
+                "league",
+                "season",
+                "home_team_id",
+                "away_team_id",
+                "home_score",
+                "away_score",
             ]
         ]
 
@@ -304,10 +341,18 @@ class DataLoader:
     def get_feature_names(self, df: pd.DataFrame) -> list[str]:
         """Get list of feature column names."""
         return [
-            c for c in df.columns
-            if c not in [
-                "match_id", "scheduled_at", "league", "season",
-                "home_team_id", "away_team_id", "home_score", "away_score"
+            c
+            for c in df.columns
+            if c
+            not in [
+                "match_id",
+                "scheduled_at",
+                "league",
+                "season",
+                "home_team_id",
+                "away_team_id",
+                "home_score",
+                "away_score",
             ]
         ]
 
@@ -333,4 +378,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

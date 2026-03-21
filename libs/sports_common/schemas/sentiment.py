@@ -23,7 +23,7 @@ class NewsAlert(BaseModel):
 
     alert_id: UUID | None = None
     entity_type: str
-    entity_id: UUID
+    entity_id: str
     headline: str
     alert_type: str
     severity: str
@@ -36,7 +36,7 @@ class RawTextPayload(BaseModel):
     model_config = {"extra": "ignore"}
 
     text: str
-    entity_id: UUID
+    entity_id: str
     entity_type: str
     source: str
     post_id: str | None = None

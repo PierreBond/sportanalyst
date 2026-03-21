@@ -11,6 +11,5 @@ if libs_path not in sys.path:
 import pytest
 
 
-@pytest.fixture(scope="session")
-def anyio_backend():
-    return "asyncio"
+def pytest_configure(config: pytest.Config) -> None:
+    pass

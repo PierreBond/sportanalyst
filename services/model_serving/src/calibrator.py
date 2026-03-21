@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from sklearn.isotonic import IsotonicRegression
 
 
 class ProbabilityCalibrator:
@@ -16,9 +15,21 @@ class ProbabilityCalibrator:
     """
 
     def __init__(self) -> None:
-        self._calibrators: dict[int, IsotonicRegression] = {}
+        self._calibrators: dict[int, Any] = {}
         self._n_classes: int = 0
         self._is_fitted: bool = False
+
+    def _get_isotonic(self) -> Any:
+        """Lazily import IsotonicRegression, raising a helpful error if sklearn is absent."""
+        try:
+            from sklearn.isotonic import IsotonicRegression
+
+            return IsotonicRegression
+        except ImportError:
+            raise RuntimeError(
+                "scikit-learn is required for ProbabilityCalibrator. "
+                "Install it with: pip install scikit-learn"
+            )
 
     def fit(self, raw_probs: np.ndarray, y_true: np.ndarray) -> None:
         """Fit one isotonic regressor per class.
@@ -37,12 +48,11 @@ class ProbabilityCalibrator:
             )
 
         if raw_probs.shape[0] < 10:
-            raise ValueError(
-                "Insufficient data for calibration. At least 10 samples required."
-            )
+            raise ValueError("Insufficient data for calibration. At least 10 samples required.")
 
         self._n_classes = raw_probs.shape[1]
         self._calibrators = {}
+        IsotonicRegression = self._get_isotonic()
 
         for c in range(self._n_classes):
             binary_target = (y_true == c).astype(int)
@@ -89,9 +99,13 @@ class ProbabilityCalibrator:
                 str(c): {
                     "x_min": iso.x_min,
                     "x_max": iso.x_max,
-                    "x_out": iso.x_out.tolist() if hasattr(iso.x_out, "tolist") else list(iso.x_out),
+                    "x_out": iso.x_out.tolist()
+                    if hasattr(iso.x_out, "tolist")
+                    else list(iso.x_out),
                     "y_in": iso.y_in.tolist() if hasattr(iso.y_in, "tolist") else list(iso.y_in),
-                    "y_out": iso.y_out.tolist() if hasattr(iso.y_out, "tolist") else list(iso.y_out),
+                    "y_out": iso.y_out.tolist()
+                    if hasattr(iso.y_out, "tolist")
+                    else list(iso.y_out),
                 }
                 for c, iso in self._calibrators.items()
             },
@@ -111,6 +125,7 @@ class ProbabilityCalibrator:
 
         for c_str, iso_state in state["calibrators"].items():
             c = int(c_str)
+            IsotonicRegression = self._get_isotonic()
             iso = IsotonicRegression(
                 y_min=iso_state["x_min"], y_max=iso_state["x_max"], out_of_bounds="clip"
             )
@@ -121,9 +136,7 @@ class ProbabilityCalibrator:
             iso.y_out = np.array(iso_state["y_out"])
             self._calibrators[c] = iso
 
-    def get_calibration_curve(
-        self, raw_probs: np.ndarray, y_true: np.ndarray
-    ) -> dict[str, Any]:
+    def get_calibration_curve(self, raw_probs: np.ndarray, y_true: np.ndarray) -> dict[str, Any]:
         """Compute calibration curve data for reliability diagram.
 
         Args:

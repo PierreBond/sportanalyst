@@ -26,9 +26,8 @@ def add_rolling_avg(
     """
     result = df.copy()
     result = result.sort_values(by=group_by + ["match_datetime"])
-    result[output_name] = (
-        result.groupby(group_by)[column]
-        .transform(lambda x: x.rolling(window=window_size, min_periods=1).mean())
+    result[output_name] = result.groupby(group_by)[column].transform(
+        lambda x: x.shift(1).rolling(window=window_size, min_periods=1).mean()
     )
     return result
 
@@ -43,9 +42,8 @@ def add_rolling_std(
     """Add a rolling standard deviation feature."""
     result = df.copy()
     result = result.sort_values(by=group_by + ["match_datetime"])
-    result[output_name] = (
-        result.groupby(group_by)[column]
-        .transform(lambda x: x.rolling(window=window_size, min_periods=1).std())
+    result[output_name] = result.groupby(group_by)[column].transform(
+        lambda x: x.rolling(window=window_size, min_periods=1).std()
     )
     return result
 
@@ -73,7 +71,10 @@ def add_momentum_slope(
 
     result[output_name] = (
         result.groupby(group_by)[column]
-        .transform(lambda x: x.rolling(window=window_size, min_periods=2).apply(linear_slope, raw=False))
+        .transform(
+            lambda x: x.rolling(window=window_size, min_periods=2).apply(linear_slope, raw=False)
+        )
+        .fillna(0.0)
     )
     return result
 
@@ -110,9 +111,8 @@ def add_idw_weighted(
         weights = [decay_factor**i for i in range(len(series) - 1, -1, -1)]
         return sum(w * v for w, v in zip(weights, series)) / sum(weights)
 
-    result[output_name] = (
-        result.groupby(group_by)[column]
-        .transform(lambda x: x.expanding().apply(weighted_avg, raw=False))
+    result[output_name] = result.groupby(group_by)[column].transform(
+        lambda x: x.expanding().apply(weighted_avg, raw=False)
     )
     return result
 
@@ -121,11 +121,7 @@ def add_rest_days(df: pd.DataFrame, output_name: str = "rest_days") -> pd.DataFr
     """Calculate days since team's last match."""
     result = df.copy()
     result = result.sort_values(by=["team_id", "match_datetime"])
-    result[output_name] = (
-        result.groupby("team_id")["match_datetime"]
-        .diff()
-        .dt.days
-    )
+    result[output_name] = result.groupby("team_id")["match_datetime"].diff().dt.days
     result[output_name] = result[output_name].fillna(7)
     return result
 
@@ -135,7 +131,9 @@ def compute_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
 
     if "goals_scored" in result.columns:
-        result = add_rolling_avg(result, "goals_scored", 5, ["team_id", "venue_type"], "rolling_avg_goals_5")
+        result = add_rolling_avg(
+            result, "goals_scored", 5, ["team_id", "venue_type"], "rolling_avg_goals_5"
+        )
         result = add_rolling_avg(result, "goals_scored", 10, ["team_id"], "rolling_avg_goals_10")
         result = add_rolling_std(result, "goals_scored", 5, ["team_id"], "rolling_std_goals_5")
         result = add_lag_feature(result, "goals_scored", 1, ["team_id"], "lag_1_goals")
