@@ -36,6 +36,10 @@ jobs:
           POSTGRES_DB: test
         ports:
           - "5432:5432"
+      redis:
+        image: redis:7
+        ports:
+          - "6379:6379"
 
     steps:
       - uses: actions/checkout@v4
@@ -48,14 +52,19 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv
-          uv pip install pytest pytest-cov pytest-asyncio httpx
+          uv pip install pytest pytest-cov pytest-asyncio httpx numpy pandas pyyaml redis scikit-learn fastapi structlog sqlalchemy asyncpg pydantic pydantic-settings kafka-python
           cd libs && uv pip install -e ".[dev]" && cd ..
 
-      - name: Run tests
+      - name: Run backend tests
         run: |
-          pytest libs/tests/ -v --cov=sports_common
+          pytest libs/tests/ services/biometric_service/tests/ services/feature_engine/tests/ services/model_training/tests/ services/nlp_service/tests/ -v --cov=sports_common --cov-report=xml:coverage.xml
+          pushd services/model_serving
+          pytest tests/ -q
+          popd
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/test
+          REDIS_URL: redis://localhost:6379/0
+          API_KEY: ci-api-key
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3
@@ -93,12 +102,22 @@ jobs:
         run: pip install bandit safety
 
       - name: Run Bandit security scan
-        run: bandit -r libs/ services/ -f json -o bandit-report.json || true
+        run: bandit -r libs/ services/ -f json -o bandit-report.json
 
       - name: Check for secrets
         run: |
           pip install detect-secrets
-          detect-secrets scan --report-type json > secrets-report.json || true
+          detect-secrets scan --report-type json > secrets-report.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("secrets-report.json").read_text())
+          results = report.get("results", {})
+          leaked = sum(len(v) for v in results.values())
+          if leaked:
+              raise SystemExit(f"detect-secrets found {leaked} potential secrets")
+          PY
 
       - name: Upload security reports
         uses: actions/upload-artifact@v3

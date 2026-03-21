@@ -102,26 +102,46 @@ jobs:
       - name: Rolling update — deploy services
         run: |
           for svc in ingestion feature-engine model-serving model-training nlp-service biometric-service reporting-service; do
-            kubectl apply -f infra/k8s/services/$svc/deployment.yml || true
-            kubectl apply -f infra/k8s/services/$svc/service.yml || true
-            kubectl apply -f infra/k8s/services/$svc/hpa.yml || true
+            kubectl apply -f infra/k8s/services/$svc/deployment.yml
+            if [ -f infra/k8s/services/$svc/service.yml ]; then kubectl apply -f infra/k8s/services/$svc/service.yml; fi
+            if [ -f infra/k8s/services/$svc/hpa.yml ]; then kubectl apply -f infra/k8s/services/$svc/hpa.yml; fi
           done
+
+      - name: Rolling update — pin service images to commit SHA
+        run: |
+          short=$(git rev-parse --short ${{ github.sha }})
+          kubectl set image deployment/ingestion ingestion=${{ env.REGISTRY }}/sports-ingestion:sha-$short -n ${{ env.NAMESPACE }}
+          kubectl set image deployment/feature-engine feature-engine=${{ env.REGISTRY }}/sports-feature-engine:sha-$short -n ${{ env.NAMESPACE }}
+          kubectl set image deployment/model-serving model-serving=${{ env.REGISTRY }}/sports-model-serving:sha-$short -n ${{ env.NAMESPACE }}
+          kubectl set image deployment/model-training model-training=${{ env.REGISTRY }}/sports-model-training:sha-$short -n ${{ env.NAMESPACE }}
+          kubectl set image deployment/nlp-service nlp-service=${{ env.REGISTRY }}/sports-nlp-service:sha-$short -n ${{ env.NAMESPACE }}
+          kubectl set image deployment/biometric-service biometric-service=${{ env.REGISTRY }}/sports-biometric-service:sha-$short -n ${{ env.NAMESPACE }}
+          kubectl set image deployment/reporting-service reporting-service=${{ env.REGISTRY }}/sports-reporting-service:sha-$short -n ${{ env.NAMESPACE }}
 
       - name: Rolling update — api-gateway
         run: |
           kubectl apply -f infra/k8s/services/api-gateway/configmap.yml
           kubectl apply -f infra/k8s/services/api-gateway/deployment.yml
           kubectl apply -f infra/k8s/services/api-gateway/service.yml
-          kubectl apply -f infra/k8s/services/api-gateway/hpa.yml || true
+          if [ -f infra/k8s/services/api-gateway/hpa.yml ]; then kubectl apply -f infra/k8s/services/api-gateway/hpa.yml; fi
 
       - name: Rolling update — image pull
         run: |
           for svc in ingestion feature-engine model-serving model-training nlp-service biometric-service reporting-service; do
             kubectl rollout status deployment/$svc -n ${{ env.NAMESPACE }} --timeout=300s
           done
-          kubectl rollout status deployment/api-gateway -n ${{ env.NAMESPACE }} --timeout=120s || true
+          kubectl rollout status deployment/api-gateway -n ${{ env.NAMESPACE }} --timeout=120s
 
       - name: Smoke test after deploy
         run: |
-          kubectl exec -n ${{ env.NAMESPACE }} deployment/ingestion -- /bin/sh -c "curl -s http://localhost:8001/health/ready" || true
-          kubectl exec -n ${{ env.NAMESPACE }} deployment/model-serving -- /bin/sh -c "curl -s http://localhost:8004/health" || true
+          kubectl port-forward -n ${{ env.NAMESPACE }} svc/ingestion 18001:8001 >/tmp/pf-ing.log 2>&1 &
+          PF_ING=$!
+          sleep 8
+          curl -fsS http://localhost:18001/health/ready
+          kill $PF_ING
+
+          kubectl port-forward -n ${{ env.NAMESPACE }} svc/model-serving 18004:8004 >/tmp/pf-ms.log 2>&1 &
+          PF_MS=$!
+          sleep 8
+          curl -fsS http://localhost:18004/health
+          kill $PF_MS
