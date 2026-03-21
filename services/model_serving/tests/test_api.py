@@ -14,9 +14,15 @@ def anyio_backend():
 
 @pytest.fixture
 async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    api_key = "test-api-key"
+    with patch.dict("os.environ", {"API_KEY": api_key}, clear=False):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"X-API-Key": api_key},
+        ) as ac:
+            yield ac
 
 
 @pytest.mark.asyncio

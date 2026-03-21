@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import importlib.util
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
@@ -12,7 +13,23 @@ from sqlalchemy import select, and_
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from alembic.models import Match, FeatureStore
+
+def _load_alembic_models() -> tuple[Any, Any]:
+    """Load local Alembic models from file to avoid package name collisions."""
+    project_root = Path(__file__).resolve().parents[3]
+    alembic_models_path = project_root / "alembic" / "models.py"
+    spec = importlib.util.spec_from_file_location("project_alembic_models", alembic_models_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load Alembic models from {alembic_models_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    # SQLAlchemy resolves string annotations via sys.modules during declarative setup.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.Match, module.FeatureStore
+
+
+Match, FeatureStore = _load_alembic_models()
 from sports_common.config import settings
 from sports_common.db import get_async_session
 from sports_common.logging import get_logger
