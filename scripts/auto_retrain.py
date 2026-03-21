@@ -28,7 +28,7 @@ class RetrainingTrigger:
         clv_threshold: float = -0.05,
         min_days_between_retrains: int = 7,
     ) -> None:
-        self._mlflow_uri = mlflow_tracking_uri or settings.MLFLOW_TRACKING_URI
+        self._mlflow_uri = mlflow_tracking_uri or settings.mlflow_tracking_uri
         self._brier_threshold = brier_threshold
         self._accuracy_threshold = accuracy_threshold
         self._clv_threshold = clv_threshold

@@ -37,6 +37,11 @@ class Settings(BaseSettings):
         validation_alias="MLFLOW_TRACKING_URI",
     )
 
+    odds_source: str = Field(
+        default="api_sports",
+        validation_alias="ODDS_SOURCE",
+    )
+
     sportsdataio_api_key: str = Field(
         default="",
         validation_alias="SPORTSDATAIO_API_KEY",
@@ -44,6 +49,14 @@ class Settings(BaseSettings):
     api_sports_key: str = Field(
         default="",
         validation_alias="API_SPORTS_KEY",
+    )
+    football_data_org_key: str = Field(
+        default="",
+        validation_alias="FOOTBALL_DATA_ORG_KEY",
+    )
+    thesportsdb_key: str = Field(
+        default="",
+        validation_alias="THESPORTSDB_KEY",
     )
     mysportsfeeds_api_key: str = Field(
         default="",
@@ -99,6 +112,15 @@ class Settings(BaseSettings):
     reddit_client_secret: str = Field(
         default="",
         validation_alias="REDDIT_CLIENT_SECRET",
+    )
+    reddit_user_agent: str = Field(
+        default="SportsPredictionSystem/1.0",
+        validation_alias="REDDIT_USER_AGENT",
+    )
+
+    google_fit_api_key: str = Field(
+        default="",
+        validation_alias="GOOGLE_FIT_API_KEY",
     )
 
     ingestion_port: int = Field(

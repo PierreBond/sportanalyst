@@ -33,12 +33,12 @@ class RedditScraper:
         self,
         client_id: str | None = None,
         client_secret: str | None = None,
-        user_agent: str = "SportsPredictionSystem/1.0",
+        user_agent: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         self._client_id = client_id or settings.reddit_client_id
         self._client_secret = client_secret or settings.reddit_client_secret
-        self._user_agent = user_agent
+        self._user_agent = user_agent or settings.reddit_user_agent
         self._base_url = "https://oauth.reddit.com"
         self._timeout = timeout
         self._access_token: str | None = None

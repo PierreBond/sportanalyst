@@ -26,10 +26,10 @@ class PredictionCache:
         """Initialize the prediction cache.
 
         Args:
-            redis_url: Redis connection URL. Defaults to settings.REDIS_URL.
+            redis_url: Redis connection URL. Defaults to settings.redis_url.
             default_ttl: Default time-to-live in seconds (default 5 minutes).
         """
-        self._redis_url = redis_url or settings.REDIS_URL
+        self._redis_url = redis_url or settings.redis_url
         self._default_ttl = default_ttl
         self._client: Redis | None = None
         self._connected = False
