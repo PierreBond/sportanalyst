@@ -16,6 +16,19 @@ from .base_model import BaseModel, ModelMeta
 logger = logger = __import__("structlog").get_logger(__name__)
 
 
+def _encode_targets(y_train: pd.Series) -> np.ndarray:
+    """Convert targets to integer class ids (0=home, 1=draw, 2=away)."""
+    y_series = y_train
+    if not isinstance(y_train, pd.Series):
+        y_series = pd.Series(y_train)
+
+    if pd.api.types.is_numeric_dtype(y_series):
+        return y_series.fillna(1).astype(int).to_numpy()
+
+    label_map = {"home_win": 0, "draw": 1, "away_win": 2}
+    return np.array([label_map.get(str(v), 1) for v in y_series], dtype=int)
+
+
 class CNN1DModel(BaseModel):
     """1D CNN for spatial pattern recognition in match features."""
 
@@ -51,8 +64,7 @@ class CNN1DModel(BaseModel):
 
         X = torch.FloatTensor(X_train.values).unsqueeze(1)
 
-        label_map = {"home_win": 0, "draw": 1, "away_win": 2}
-        y = torch.LongTensor([label_map.get(str(v), 1) for v in y_train])
+        y = torch.LongTensor(_encode_targets(y_train))
 
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -141,8 +153,7 @@ class LSTMModel(BaseModel):
 
         X = torch.FloatTensor(X_train.values).unsqueeze(1)
 
-        label_map = {"home_win": 0, "draw": 1, "away_win": 2}
-        y = torch.LongTensor([label_map.get(str(v), 1) for v in y_train])
+        y = torch.LongTensor(_encode_targets(y_train))
 
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -226,8 +237,7 @@ class CNNLSTMModel(BaseModel):
 
         X = torch.FloatTensor(X_train.values).unsqueeze(1)
 
-        label_map = {"home_win": 0, "draw": 1, "away_win": 2}
-        y = torch.LongTensor([label_map.get(str(v), 1) for v in y_train])
+        y = torch.LongTensor(_encode_targets(y_train))
 
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -322,8 +332,7 @@ class TransformerModel(BaseModel):
 
         X = torch.FloatTensor(X_train.values).unsqueeze(1)
 
-        label_map = {"home_win": 0, "draw": 1, "away_win": 2}
-        y = torch.LongTensor([label_map.get(str(v), 1) for v in y_train])
+        y = torch.LongTensor(_encode_targets(y_train))
 
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -418,8 +427,7 @@ class TabNetModel(BaseModel):
 
         X = torch.FloatTensor(X_train.values)
 
-        label_map = {"home_win": 0, "draw": 1, "away_win": 2}
-        y = torch.LongTensor([label_map.get(str(v), 1) for v in y_train])
+        y = torch.LongTensor(_encode_targets(y_train))
 
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=32, shuffle=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -130,6 +131,27 @@ _explainer: PredictionExplainer | None = None
 _predictor: ModelPredictor | None = None
 
 
+def _is_truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _require_loaded_model() -> bool:
+    """Return True when startup must fail if the model could not be loaded."""
+    explicit = os.getenv("REQUIRE_LOADED_MODEL")
+    if explicit is not None:
+        return _is_truthy(explicit)
+
+    app_env = (
+        os.getenv("APP_ENV")
+        or os.getenv("ENVIRONMENT")
+        or os.getenv("ENV")
+        or "development"
+    ).strip().lower()
+    return app_env in {"prod", "production", "staging"}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and tear down service dependencies."""
@@ -153,6 +175,12 @@ async def lifespan(app: FastAPI):
 
     _predictor = ModelPredictor()
     _predictor.load_model()
+
+    if _require_loaded_model() and not _predictor.is_loaded:
+        raise RuntimeError(
+            "Model serving startup aborted: no model loaded. "
+            "Set MODEL_URI or MODEL_PATH, or disable REQUIRE_LOADED_MODEL in non-production."
+        )
 
     logger.info("model_serving_started")
     yield

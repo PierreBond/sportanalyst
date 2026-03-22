@@ -8,7 +8,7 @@ from .injury_risk import InjuryRiskModel
 
 try:
     from .deep_learning import (
-        CNNModel,
+        CNN1DModel as CNNModel,
         LSTMModel,
         CNNLSTMModel,
         TransformerModel,

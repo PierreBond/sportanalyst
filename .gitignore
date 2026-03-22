@@ -47,6 +47,8 @@ Thumbs.db
 
 *.log
 logs/
+mlruns/
+services/model_serving/models/
 
 postgres_data/
 redis_data/
