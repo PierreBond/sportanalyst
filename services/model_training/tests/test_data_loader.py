@@ -142,17 +142,17 @@ class TestCreateTarget:
     def test_home_win(self, loader: DataLoader) -> None:
         df = pd.DataFrame({"home_score": [3], "away_score": [1]})
         target = loader.create_target(df)
-        assert target.iloc[0] == "home_win"
+        assert target.iloc[0] == 0
 
     def test_away_win(self, loader: DataLoader) -> None:
         df = pd.DataFrame({"home_score": [0], "away_score": [2]})
         target = loader.create_target(df)
-        assert target.iloc[0] == "away_win"
+        assert target.iloc[0] == 2
 
     def test_draw(self, loader: DataLoader) -> None:
         df = pd.DataFrame({"home_score": [1], "away_score": [1]})
         target = loader.create_target(df)
-        assert target.iloc[0] == "draw"
+        assert target.iloc[0] == 1
 
     def test_empty_df(self, loader: DataLoader) -> None:
         target = loader.create_target(pd.DataFrame())
