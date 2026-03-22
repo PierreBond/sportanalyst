@@ -23,7 +23,21 @@ def compute_brier_score(
     n_classes: int = 3,
 ) -> float:
     """Compute Brier score for multiclass predictions."""
-    return brier_score_loss(y_true, y_prob, multi_label="ovr")
+    y_true_arr = np.asarray(y_true)
+    y_prob_arr = np.asarray(y_prob)
+
+    if y_prob_arr.ndim == 1:
+        return float(brier_score_loss(y_true_arr, y_prob_arr))
+
+    if y_true_arr.dtype.kind in {"U", "S", "O"}:
+        classes = ["home_win", "draw", "away_win"][: y_prob_arr.shape[1]]
+        class_to_idx = {c: i for i, c in enumerate(classes)}
+        y_idx = np.array([class_to_idx.get(str(v), 1) for v in y_true_arr])
+    else:
+        y_idx = y_true_arr.astype(int)
+
+    one_hot = np.eye(y_prob_arr.shape[1])[y_idx]
+    return float(np.mean(np.sum((y_prob_arr - one_hot) ** 2, axis=1)))
 
 
 def compute_log_loss(
@@ -130,3 +144,34 @@ def compute_all_metrics(
         "f1_macro": compute_f1_score(y_true, y_pred, average="macro"),
         "f1_weighted": compute_f1_score(y_true, y_pred, average="weighted"),
     }
+
+
+class ModelEvaluator:
+    """Compatibility wrapper expected by training pipeline."""
+
+    def compute_metrics(
+        self,
+        y_true: pd.Series | np.ndarray,
+        y_prob: np.ndarray,
+        model_name: str | None = None,
+    ) -> dict[str, float]:
+        y_true_arr = np.asarray(y_true)
+        y_prob_arr = np.asarray(y_prob)
+
+        if y_true_arr.dtype.kind in {"U", "S", "O"}:
+            class_to_idx = {"home_win": 0, "draw": 1, "away_win": 2}
+            y_true_idx = np.array([class_to_idx.get(str(v), 1) for v in y_true_arr])
+        else:
+            y_true_idx = y_true_arr.astype(int)
+
+        y_pred = np.argmax(y_prob_arr, axis=1)
+
+        metrics = {
+            "accuracy": compute_accuracy(y_true_idx, y_pred),
+            "brier_score": compute_brier_score(y_true_idx, y_prob_arr),
+            "log_loss": compute_log_loss(y_true_idx, y_prob_arr),
+            "f1_macro": compute_f1_score(y_true_idx, y_pred, average="macro"),
+            "f1_weighted": compute_f1_score(y_true_idx, y_pred, average="weighted"),
+        }
+
+        return metrics

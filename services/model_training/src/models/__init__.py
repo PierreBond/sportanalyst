@@ -2,16 +2,24 @@ from __future__ import annotations
 
 from .base_model import BaseModel, ModelMeta
 from .poisson import PoissonModel
-from .bayesian import BayesianModel
+from .bayesian import BayesianTeamModel as BayesianModel
 from .gradient_boosting import XGBoostModel, RandomForestModel
-from .deep_learning import (
-    CNNModel,
-    LSTMModel,
-    CNNLSTMModel,
-    TransformerModel,
-    TabNetModel,
-)
 from .injury_risk import InjuryRiskModel
+
+try:
+    from .deep_learning import (
+        CNNModel,
+        LSTMModel,
+        CNNLSTMModel,
+        TransformerModel,
+        TabNetModel,
+    )
+except ImportError:
+    CNNModel = None
+    LSTMModel = None
+    CNNLSTMModel = None
+    TransformerModel = None
+    TabNetModel = None
 
 __all__ = [
     "BaseModel",
@@ -20,10 +28,14 @@ __all__ = [
     "BayesianModel",
     "XGBoostModel",
     "RandomForestModel",
-    "CNNModel",
-    "LSTMModel",
-    "CNNLSTMModel",
-    "TransformerModel",
-    "TabNetModel",
     "InjuryRiskModel",
 ]
+
+if CNNModel is not None:
+    __all__.extend([
+        "CNNModel",
+        "LSTMModel",
+        "CNNLSTMModel",
+        "TransformerModel",
+        "TabNetModel",
+    ])

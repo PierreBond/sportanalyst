@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -72,8 +73,9 @@ class XGBoostModel:
     def get_feature_importance(self) -> dict[str, float]:
         if self._model is None:
             return {}
-        importance = self._model.get_score(importance_type="gain")
-        return {self._feature_names[int(k[1:])]: v for k, v in importance.items()}
+        raw_importance = self._model.get_score(importance_type="gain")
+        importance = cast(dict[str, float], raw_importance)
+        return {self._feature_names[int(k[1:])]: float(v) for k, v in importance.items()}
 
 
 class RandomForestModel:
@@ -121,3 +123,29 @@ class RandomForestModel:
         if self._model is None:
             return {}
         return dict(zip(self._feature_names, self._model.feature_importances_))
+
+
+def create_xgboost_model(**hyperparameters: Any) -> XGBoostModel:
+    """Factory function to create an XGBoost model."""
+    params: dict[str, Any] = {
+        "n_estimators": 100,
+        "max_depth": 6,
+        "learning_rate": 0.1,
+        "objective": "multi:softprob",
+        "num_class": 3,
+    }
+    for key, value in hyperparameters.items():
+        params[key] = value
+    return XGBoostModel(params=params)
+
+
+def create_random_forest_model(**hyperparameters: Any) -> RandomForestModel:
+    """Factory function to create a Random Forest model."""
+    params: dict[str, Any] = {
+        "n_estimators": 100,
+        "max_depth": 10,
+        "random_state": 42,
+    }
+    for key, value in hyperparameters.items():
+        params[key] = value
+    return RandomForestModel(params=params)

@@ -92,7 +92,8 @@ class DataLoader:
         end_date: datetime | None = None,
     ) -> pd.DataFrame:
         """Load features from feature store with optional filters."""
-        async with get_async_session() as session:
+        rows = []
+        async for session in get_async_session():
             query = select(FeatureStore, Match).join(Match, FeatureStore.match_id == Match.match_id)
 
             conditions = []
@@ -110,6 +111,7 @@ class DataLoader:
 
             result = await session.execute(query)
             rows = result.all()
+            break
 
         if not rows:
             logger.warning("no_features_found")
@@ -140,7 +142,7 @@ class DataLoader:
         return df
 
     def filter_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Filter out training-ineligible features."""
+        """Filter out training-ineligible features and non-numeric columns."""
         if df.empty:
             return df
 
@@ -161,6 +163,12 @@ class DataLoader:
         ]
 
         filtered_cols = [c for c in feature_cols if c not in self._excluded_features]
+        
+        # Drop non-numeric columns (strings, objects) for XGBoost compatibility
+        numeric_cols = []
+        for col in filtered_cols:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                numeric_cols.append(col)
 
         result = df[
             [
@@ -173,14 +181,14 @@ class DataLoader:
                 "home_score",
                 "away_score",
             ]
-            + filtered_cols
+            + numeric_cols
         ].copy()
 
         logger.info(
             "features_filtered",
             original=len(feature_cols),
-            filtered=len(filtered_cols),
-            excluded=len(feature_cols) - len(filtered_cols),
+            filtered=len(numeric_cols),
+            excluded=len(feature_cols) - len(numeric_cols),
         )
         return result
 
@@ -228,21 +236,22 @@ class DataLoader:
         return result
 
     def create_target(self, df: pd.DataFrame) -> pd.Series:
-        """Create target variable: home_win | draw | away_win."""
+        """Create target variable: 0=home_win, 1=draw, 2=away_win."""
         if df.empty:
-            return pd.Series(dtype=str)
+            return pd.Series(dtype=int)
 
         def get_result(row):
             if pd.isna(row["home_score"]) or pd.isna(row["away_score"]):
                 return None
             if row["home_score"] > row["away_score"]:
-                return "home_win"
+                return 0  # home_win
             elif row["home_score"] < row["away_score"]:
-                return "away_win"
+                return 2  # away_win
             else:
-                return "draw"
+                return 1  # draw
 
-        return df.apply(get_result, axis=1)
+        result = df.apply(get_result, axis=1)
+        return result.astype("Int64")
 
     def chronological_split(
         self,

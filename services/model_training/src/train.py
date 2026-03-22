@@ -15,16 +15,24 @@ from models.base_model import ModelMeta
 from models.poisson import create_poisson_model
 from models.bayesian import create_bayesian_model
 from models.gradient_boosting import create_xgboost_model, create_random_forest_model
-from models.deep_learning import (
-    create_cnn_model,
-    create_lstm_model,
-    create_cnn_lstm_model,
-    create_transformer_model,
-    create_tabnet_model,
-)
 from evaluator import ModelEvaluator
 from registry import ModelRegistry
 from sports_common.logging import setup_logging, get_logger
+
+try:
+    from models.deep_learning import (
+        create_cnn_model,
+        create_lstm_model,
+        create_cnn_lstm_model,
+        create_transformer_model,
+        create_tabnet_model,
+    )
+except ImportError:
+    create_cnn_model = None
+    create_lstm_model = None
+    create_cnn_lstm_model = None
+    create_transformer_model = None
+    create_tabnet_model = None
 
 setup_logging("model-training")
 logger = get_logger(__name__)
@@ -35,12 +43,18 @@ MODEL_FACTORIES = {
     "bayesian": create_bayesian_model,
     "random_forest": create_random_forest_model,
     "xgboost": create_xgboost_model,
-    "cnn": create_cnn_model,
-    "lstm": create_lstm_model,
-    "cnn_lstm": create_cnn_lstm_model,
-    "transformer": create_transformer_model,
-    "tabnet": create_tabnet_model,
 }
+
+if create_cnn_model is not None:
+    MODEL_FACTORIES.update(
+        {
+            "cnn": create_cnn_model,
+            "lstm": create_lstm_model,
+            "cnn_lstm": create_cnn_lstm_model,
+            "transformer": create_transformer_model,
+            "tabnet": create_tabnet_model,
+        }
+    )
 
 
 def load_config(config_path: str | Path) -> dict[str, Any]:

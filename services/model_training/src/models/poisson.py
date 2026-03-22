@@ -156,3 +156,13 @@ class PoissonModel(BaseModel):
             version=data["meta"]["version"],
             hyperparameters=data["meta"]["hyperparameters"],
         )
+
+
+def create_poisson_model(simulations: int = 10000) -> PoissonModel:
+    """Factory function to create a Poisson model."""
+    meta = ModelMeta(
+        name="poisson_match_outcome",
+        version="1.0.0",
+        hyperparameters={"simulations": simulations},
+    )
+    return PoissonModel(meta)

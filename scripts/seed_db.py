@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "libs"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "alembic"))
 
 from sqlalchemy import select
 
@@ -74,7 +75,7 @@ async def seed_teams(db: DatabaseClient, leagues: list[str]) -> dict[str, str]:
     ]
 
     async with db.session() as session:
-        from alembic.models import Team
+        from models import Team
         from uuid import uuid4
 
         for team_data in teams_data:
@@ -102,7 +103,7 @@ async def seed_matches(
     """Seed matches and return mapping of external_id to internal UUID."""
     import random
     from uuid import uuid4
-    from alembic.models import Match
+    from models import Match
 
     match_mapping = {}
     match_data = []
@@ -163,7 +164,7 @@ async def seed_odds(db: DatabaseClient, match_mapping: dict[str, str]) -> None:
     """Seed odds snapshots for matches."""
     import random
     from uuid import uuid4
-    from alembic.models import OddsSnapshot
+    from models import OddsSnapshot
     from decimal import Decimal
 
     odds_data = []
@@ -199,11 +200,11 @@ async def seed_biometrics(db: DatabaseClient) -> None:
     """Seed player biometric data."""
     import random
     from uuid import uuid4
-    from alembic.models import PlayerBiometric
+    from models import PlayerBiometric
     from decimal import Decimal
 
     async with db.session() as session:
-        from alembic.models import Player
+        from models import Player
 
         result = await session.execute(select(Player).limit(10))
         players = result.scalars().all()
