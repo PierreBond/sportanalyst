@@ -27,6 +27,8 @@ spec:
                 secretKeyRef:
                   name: sports-api-key
                   key: API_KEY
+            - name: REQUIRE_LOADED_MODEL
+              value: "true"
           resources:
             requests:
               memory: "512Mi"

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 import sys
 
@@ -72,13 +73,41 @@ def _markdown_table(rows: list[dict[str, float | str]]) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
+def _load_training_data() -> tuple[pd.DataFrame, np.ndarray, pd.DataFrame, np.ndarray, str]:
+    """Load data from DB-backed feature store, else fallback to synthetic data for CI/local runs."""
     loader = DataLoader()
 
-    X_train, y_train, X_val, y_val, X_test, y_test = loader.prepare_training_data()
-    if X_train.empty or X_test.empty or y_train is None or y_test is None:
-        print("No training/test data available; run DB + seeding first.")
-        return 1
+    try:
+        X_train, y_train, X_val, y_val, X_test, y_test = loader.prepare_training_data()
+        if not X_train.empty and not X_test.empty and y_train is not None and y_test is not None:
+            return X_train, y_train.astype(int).to_numpy(), X_test, y_test.astype(int).to_numpy(), "feature_store"
+    except Exception:
+        pass
+
+    from sklearn.datasets import make_classification
+
+    X, y = make_classification(
+        n_samples=500,
+        n_features=12,
+        n_informative=10,
+        n_redundant=2,
+        n_classes=3,
+        n_clusters_per_class=1,
+        random_state=42,
+    )
+    cols = [f"f{i}" for i in range(12)]
+    df = pd.DataFrame(X, columns=cols)
+
+    split = int(len(df) * 0.8)
+    X_train = df.iloc[:split].reset_index(drop=True)
+    y_train = y[:split]
+    X_test = df.iloc[split:].reset_index(drop=True)
+    y_test = y[split:]
+    return X_train, y_train, X_test, y_test, "synthetic"
+
+
+def main() -> int:
+    X_train, y_train, X_test, y_test, data_source = _load_training_data()
 
     rows: list[dict[str, float | str]] = []
 
@@ -137,6 +166,7 @@ def main() -> int:
         "# Model Benchmark",
         "",
         f"Generated at: {datetime.now(timezone.utc).isoformat()}",
+        f"Data source: {data_source}",
         f"Train samples: {len(X_train)}",
         f"Test samples: {len(X_test)}",
         f"Deep model status: {deep_status}",
