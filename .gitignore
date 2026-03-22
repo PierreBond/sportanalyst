@@ -52,6 +52,10 @@ services/model_serving/models/
 
 postgres_data/
 redis_data/
-coding_review.md
 *.md
+!README.md
+!**/README.md
+!readme.md
+!**/readme.md
 frontend/.env.example
+staff/
