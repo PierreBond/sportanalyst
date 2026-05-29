@@ -58,4 +58,4 @@ redis_data/
 !readme.md
 !**/readme.md
 frontend/.env.example
-staff/
+staff/recovery-codes-for-vercel.txt
