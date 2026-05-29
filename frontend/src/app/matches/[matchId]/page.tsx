@@ -3,19 +3,10 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { SHAPWaterfall } from "@/components/SHAPWaterfall";
-import { BiometricGauge } from "@/components/BiometricGauge";
-import { SentimentBadge } from "@/components/SentimentBadge";
+import { DataSourceBadge } from "@/components/DataSourceBadge";
 import { getPrediction, getWebSocketUrl } from "@/lib/api";
 import { useWebSocket } from "@/lib/ws";
 import type { PredictionResponse, LineMovement } from "@/types";
-
-const sampleLineMovement: LineMovement[] = [
-  { timestamp: "2026-03-15T10:00:00Z", spread: -2.5, total: 7.5, home_odds: 1.95, away_odds: 1.95 },
-  { timestamp: "2026-03-15T11:00:00Z", spread: -3.0, total: 7.5, home_odds: 1.90, away_odds: 2.00 },
-  { timestamp: "2026-03-15T12:00:00Z", spread: -3.0, total: 7.0, home_odds: 1.85, away_odds: 2.05 },
-  { timestamp: "2026-03-15T13:00:00Z", spread: -2.5, total: 7.0, home_odds: 1.90, away_odds: 2.00 },
-  { timestamp: "2026-03-15T14:00:00Z", spread: -2.5, total: 6.5, home_odds: 1.92, away_odds: 1.98 },
-];
 
 export default function MatchDetailPage() {
   const params = useParams();
@@ -24,7 +15,7 @@ export default function MatchDetailPage() {
   const [prediction, setPrediction] = useState<PredictionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lineMovement] = useState<LineMovement[]>(sampleLineMovement);
+  const [lineMovement] = useState<LineMovement[]>([]);
 
   const { connect, disconnect, isConnected } = useWebSocket({
     onMessage: (message) => {
@@ -105,6 +96,13 @@ export default function MatchDetailPage() {
             <p className="text-gray-500 mt-1">
               {prediction.league} • {prediction.model} v{prediction.model_version}
             </p>
+            <div className="mt-3">
+              <DataSourceBadge
+                label="Mixed"
+                detail="prediction and websocket are live; line movement, sentiment, biometrics feeds are unavailable"
+                tone="mixed"
+              />
+            </div>
           </div>
           <div className="flex items-center space-x-2">
             {isConnected && (
@@ -180,39 +178,13 @@ export default function MatchDetailPage() {
             <h2 className="text-xl font-semibold text-gray-900 mb-4">
               Team Status
             </h2>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="font-medium">{prediction.home_team}</span>
-                <SentimentBadge score={0.3} volume={1250} size="sm" />
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="font-medium">{prediction.away_team}</span>
-                <SentimentBadge score={-0.15} volume={980} size="sm" />
-              </div>
-            </div>
+            <p className="text-gray-500 text-sm">Sentiment feed unavailable for this match.</p>
 
             <div className="mt-6 pt-6 border-t border-gray-200">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
                 Team Biometrics
               </h3>
-              <div className="grid grid-cols-2 gap-4">
-                <BiometricGauge
-                  label="Home ACWR"
-                  value={1.2}
-                  min={0}
-                  max={2}
-                  unit=""
-                  thresholds={{ low: 0.8, high: 1.5 }}
-                />
-                <BiometricGauge
-                  label="Away ACWR"
-                  value={0.9}
-                  min={0}
-                  max={2}
-                  unit=""
-                  thresholds={{ low: 0.8, high: 1.5 }}
-                />
-              </div>
+              <p className="text-gray-500 text-sm">Biometric feed unavailable for this match.</p>
             </div>
           </div>
         </div>

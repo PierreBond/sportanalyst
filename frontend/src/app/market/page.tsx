@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getValueBets } from "@/lib/api";
+import { DataSourceBadge } from "@/components/DataSourceBadge";
 import type { ValueBet } from "@/types";
 
 type SortKey = "edge" | "kelly" | "odds";
@@ -100,6 +101,13 @@ export default function MarketPage() {
         <p className="text-gray-500 mt-1">
           Real-time pricing inefficiencies and position sizing guidance
         </p>
+        <div className="mt-3">
+          <DataSourceBadge
+            label="Live API"
+            detail="value-bets endpoint responds live; content may be simulated by backend"
+            tone="mixed"
+          />
+        </div>
       </div>
 
       {error && (

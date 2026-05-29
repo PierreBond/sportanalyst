@@ -1,43 +1,50 @@
 "use client";
 
-import { useState } from "react";
-import { getReportPDF } from "@/lib/api";
-
-interface Report {
-  match_id: string;
-  home_team: string;
-  away_team: string;
-  generated_at: string;
-  league: string;
-}
-
-const mockReports: Report[] = [
-  {
-    match_id: "match-001",
-    home_team: "Manchester City",
-    away_team: "Arsenal",
-    generated_at: "2026-03-15T14:30:00Z",
-    league: "Premier League",
-  },
-  {
-    match_id: "match-002",
-    home_team: "Liverpool",
-    away_team: "Chelsea",
-    generated_at: "2026-03-14T18:00:00Z",
-    league: "Premier League",
-  },
-  {
-    match_id: "match-003",
-    home_team: "Barcelona",
-    away_team: "Real Madrid",
-    generated_at: "2026-03-13T20:00:00Z",
-    league: "La Liga",
-  },
-];
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { getReport, getReportPDF, getUpcomingMatches } from "@/lib/api";
+import { DataSourceBadge } from "@/components/DataSourceBadge";
+import type { MatchResearchSnapshot } from "@/types";
 
 export default function ReportsPage() {
-  const [reports] = useState<Report[]>(mockReports);
+  const [reports, setReports] = useState<MatchResearchSnapshot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadReports() {
+      setLoading(true);
+      try {
+        const fixtures = await getUpcomingMatches(10);
+        if (fixtures.matches.length === 0) {
+          setReports([]);
+          setError("No upcoming fixtures available to generate reports.");
+          return;
+        }
+
+        const reportResults = await Promise.allSettled(
+          fixtures.matches.slice(0, 8).map((match) => getReport(match.match_id))
+        );
+
+        const liveReports = reportResults
+          .filter(
+            (result): result is PromiseFulfilledResult<MatchResearchSnapshot> =>
+              result.status === "fulfilled"
+          )
+          .map((result) => result.value);
+
+        setReports(liveReports);
+        setError(liveReports.length === 0 ? "Failed to load live reports from backend." : null);
+      } catch {
+        setError("Failed to load reports.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadReports();
+  }, []);
 
   const handleDownloadPDF = async (matchId: string) => {
     setDownloading(matchId);
@@ -74,9 +81,22 @@ export default function ReportsPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Match Reports</h1>
         <p className="text-gray-500 mt-1">
-          Generated match research reports and analysis
+          Live reports generated from backend fixtures and prediction context.
         </p>
+        <div className="mt-3">
+          <DataSourceBadge
+            label="Live API"
+            detail="report rows and analysis are fetched from backend endpoints"
+            tone="live"
+          />
+        </div>
       </div>
+
+      {error && (
+        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center space-x-2 text-sm text-gray-500">
@@ -96,12 +116,19 @@ export default function ReportsPage() {
           <span>{reports.length} reports available</span>
         </div>
 
-        <button className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm">
+        <button
+          onClick={() => window.location.reload()}
+          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm"
+        >
           Refresh Reports
         </button>
       </div>
 
-      {reports.length === 0 ? (
+      {loading ? (
+        <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
+          Loading live reports...
+        </div>
+      ) : reports.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
           <div className="text-gray-400 mb-4">
             <svg
@@ -122,7 +149,7 @@ export default function ReportsPage() {
             No Reports Yet
           </h3>
           <p className="text-gray-500">
-            Match reports will appear here after predictions are generated
+            No reports could be generated from currently available fixtures.
           </p>
         </div>
       ) : (
@@ -140,7 +167,7 @@ export default function ReportsPage() {
                         {report.home_team} vs {report.away_team}
                       </h3>
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
-                        {report.league}
+                        {report.league.replaceAll("_", " ")}
                       </span>
                     </div>
                     <p className="text-sm text-gray-500">
@@ -149,12 +176,12 @@ export default function ReportsPage() {
                   </div>
 
                   <div className="flex items-center space-x-3">
-                    <a
+                    <Link
                       href={`/matches/${report.match_id}`}
                       className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
                     >
                       View Analysis
-                    </a>
+                    </Link>
                     <button
                       onClick={() => handleDownloadPDF(report.match_id)}
                       disabled={downloading === report.match_id}

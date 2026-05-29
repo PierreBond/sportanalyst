@@ -201,7 +201,9 @@ jobs:
       - name: Run E2E tests
         run: |
           pip install httpx asyncio
-          python scripts/e2e_test.py --url http://localhost:8004
+          python scripts/e2e_test.py --url http://localhost:8004 --api-key "$API_KEY"
+        env:
+          API_KEY: ci-api-key
 
       - name: Cleanup
         if: always()

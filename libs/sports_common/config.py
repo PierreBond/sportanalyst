@@ -144,6 +144,15 @@ class Settings(BaseSettings):
         validation_alias="REPORTING_SERVICE_PORT",
     )
 
+    league_allowlist: str = Field(
+        default="",
+        validation_alias="LEAGUE_ALLOWLIST",
+    )
+    league_blocklist: str = Field(
+        default="",
+        validation_alias="LEAGUE_BLOCKLIST",
+    )
+
     @model_validator(mode="after")
     def check_required_secrets(self) -> "Settings":
         if not self.database_url:
@@ -168,6 +177,32 @@ class Settings(BaseSettings):
             "processed_features": "processed.features",
             "processed_predictions": "processed.predictions",
         }
+
+    @property
+    def league_allowlist_set(self) -> set[str]:
+        if not self.league_allowlist:
+            return set()
+        return {l.strip() for l in self.league_allowlist.split(",") if l.strip()}
+
+    @property
+    def league_blocklist_set(self) -> set[str]:
+        if not self.league_blocklist:
+            return set()
+        return {l.strip() for l in self.league_blocklist.split(",") if l.strip()}
+
+    def should_process_league(self, league: str) -> bool:
+        """Determine if a league should be processed based on allow/block lists.
+
+        Precedence:
+        - If allowlist is set, only process leagues in the allowlist
+        - Then remove any leagues in the blocklist
+        """
+        if self.league_allowlist_set:
+            if league not in self.league_allowlist_set:
+                return False
+        if league in self.league_blocklist_set:
+            return False
+        return True
 
 
 settings = Settings()

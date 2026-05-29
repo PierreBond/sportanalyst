@@ -1,0 +1,122 @@
+# Dynamic League Configuration
+# 
+# This file defines which leagues the system should process.
+# Use LEAGUE_ALLOWLIST and LEAGUE_BLOCKLIST env vars to override these settings.
+#
+# If neither LEAGUE_ALLOWLIST nor LEAGUE_BLOCKLIST is set, all configured
+# leagues will be processed.
+#
+# Format:
+#   league_id: Unique identifier (used in DB and API)
+#   display_name: Human-readable name for UI
+#   enabled: Whether to process this league by default
+#   provider_league_ids: Mapping from provider-specific IDs to this league
+#   sport: Sport type (football, basketball, etc.)
+
+leagues:
+  premier_league:
+    display_name: Premier League
+    enabled: true
+    sport: football
+    provider_league_ids:
+      api_sports: 39
+      sportsdataio: 4
+      the_sports_db: 4328
+    country: England
+  
+  la_liga:
+    display_name: La Liga
+    enabled: true
+    sport: football
+    provider_league_ids:
+      api_sports: 140
+      sportsdataio: 15
+      the_sports_db: 4335
+    country: Spain
+  
+  serie_a:
+    display_name: Serie A
+    enabled: true
+    sport: football
+    provider_league_ids:
+      api_sports: 135
+      sportsdataio: 21
+      the_sports_db: 4346
+    country: Italy
+  
+  bundesliga:
+    display_name: Bundesliga
+    enabled: true
+    sport: football
+    provider_league_ids:
+      api_sports: 78
+      sportsdataio: 1
+      the_sports_db: 4331
+    country: Germany
+  
+  ligue_1:
+    display_name: Ligue 1
+    enabled: true
+    sport: football
+    provider_league_ids:
+      api_sports: 61
+      sportsdataio: 5
+      the_sports_db: 4334
+    country: France
+  
+  mls:
+    display_name: Major League Soccer
+    enabled: true
+    sport: football
+    provider_league_ids:
+      api_sports: 258
+      sportsdataio: 8
+      the_sports_db: 4354
+    country: USA
+  
+  eredivisie:
+    display_name: Eredivisie
+    enabled: false
+    sport: football
+    provider_league_ids:
+      api_sports: 88
+      sportsdataio: 7
+    country: Netherlands
+  
+  j1_league:
+    display_name: J1 League
+    enabled: false
+    sport: football
+    provider_league_ids:
+      api_sports: 98
+    country: Japan
+  
+  nba:
+    display_name: NBA
+    enabled: false
+    sport: basketball
+    provider_league_ids:
+      api_sports: 46
+      sportsdataio: 2
+    country: USA
+  
+  nfl:
+    display_name: NFL
+    enabled: false
+    sport: american_football
+    provider_league_ids:
+      api_sports: 28
+    country: USA
+
+# League processing order (for priority in UI)
+processing_order:
+  - premier_league
+  - bundesliga
+  - la_liga
+  - serie_a
+  - ligue_1
+  - mls
+  - eredivisie
+  - j1_league
+  - nba
+  - nfl

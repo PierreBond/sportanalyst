@@ -33,7 +33,7 @@ class BaseAdapter(abc.ABC):
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 headers=headers,
-                timeout=httpx.Timeout(connect=5.0, read=self._timeout),
+                timeout=httpx.Timeout(self._timeout, connect=5.0),
             )
         return self._client
 

@@ -67,7 +67,7 @@ describe("PredictionCard", () => {
   it("highlights the winning outcome", () => {
     render(<PredictionCard prediction={mockPrediction} />);
 
-    const homeButton = screen.getByText("55%").closest("div");
-    expect(homeButton).toHaveClass("bg-blue-600");
+    const homeOutcome = screen.getByText("Home").parentElement;
+    expect(homeOutcome).toHaveClass("bg-blue-600");
   });
 });

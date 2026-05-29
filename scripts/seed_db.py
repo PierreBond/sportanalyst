@@ -8,6 +8,7 @@ Usage:
     python scripts/seed_db.py --seasons 2021 2022 2023 2024 2025
     python scripts/seed_db.py --leagues premier_league --seasons 2024-25
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,52 +28,101 @@ from sports_common.logging import setup_logging, get_logger
 setup_logging("seed-db")
 logger = get_logger(__name__)
 
+TEAMS_BY_LEAGUE: dict[str, list[dict]] = {
+    "premier_league": [
+        {
+            "external_id": "epl-001",
+            "name": "Manchester City",
+            "short_name": "MCI",
+            "country": "England",
+        },
+        {"external_id": "epl-002", "name": "Arsenal", "short_name": "ARS", "country": "England"},
+        {"external_id": "epl-003", "name": "Liverpool", "short_name": "LIV", "country": "England"},
+        {"external_id": "epl-004", "name": "Chelsea", "short_name": "CHE", "country": "England"},
+        {
+            "external_id": "epl-005",
+            "name": "Manchester United",
+            "short_name": "MUN",
+            "country": "England",
+        },
+        {"external_id": "epl-006", "name": "Tottenham", "short_name": "TOT", "country": "England"},
+        {"external_id": "epl-007", "name": "Newcastle", "short_name": "NEW", "country": "England"},
+        {
+            "external_id": "epl-008",
+            "name": "Manchester City",
+            "short_name": "MCI",
+            "country": "England",
+        },
+    ],
+    "la_liga": [
+        {"external_id": "ll-001", "name": "Real Madrid", "short_name": "RMA", "country": "Spain"},
+        {"external_id": "ll-002", "name": "Barcelona", "short_name": "BAR", "country": "Spain"},
+        {
+            "external_id": "ll-003",
+            "name": "Atletico Madrid",
+            "short_name": "ATM",
+            "country": "Spain",
+        },
+        {"external_id": "ll-004", "name": "Sevilla", "short_name": "SEV", "country": "Spain"},
+        {"external_id": "ll-005", "name": "Real Sociedad", "short_name": "RSO", "country": "Spain"},
+    ],
+    "serie_a": [
+        {"external_id": "sa-001", "name": "Inter Milan", "short_name": "INT", "country": "Italy"},
+        {"external_id": "sa-002", "name": "AC Milan", "short_name": "MIL", "country": "Italy"},
+        {"external_id": "sa-003", "name": "Juventus", "short_name": "JUV", "country": "Italy"},
+        {"external_id": "sa-004", "name": "Napoli", "short_name": "NAP", "country": "Italy"},
+        {"external_id": "sa-005", "name": "Roma", "short_name": "ROM", "country": "Italy"},
+    ],
+    "bundesliga": [
+        {
+            "external_id": "bl-001",
+            "name": "Bayern Munich",
+            "short_name": "BAY",
+            "country": "Germany",
+        },
+        {
+            "external_id": "bl-002",
+            "name": "Borussia Dortmund",
+            "short_name": "BVB",
+            "country": "Germany",
+        },
+        {"external_id": "bl-003", "name": "RB Leipzig", "short_name": "RBL", "country": "Germany"},
+        {"external_id": "bl-004", "name": "Leverkusen", "short_name": "LEV", "country": "Germany"},
+        {
+            "external_id": "bl-005",
+            "name": "Eintracht Frankfurt",
+            "short_name": "FRA",
+            "country": "Germany",
+        },
+    ],
+    "ligue_1": [
+        {"external_id": "l1-001", "name": "PSG", "short_name": "PSG", "country": "France"},
+        {"external_id": "l1-002", "name": "Marseille", "short_name": "MAR", "country": "France"},
+        {"external_id": "l1-003", "name": "Lyon", "short_name": "LYO", "country": "France"},
+        {"external_id": "l1-004", "name": "Monaco", "short_name": "MON", "country": "France"},
+        {"external_id": "l1-005", "name": "Lille", "short_name": "LIL", "country": "France"},
+    ],
+}
+
 
 async def seed_teams(db: DatabaseClient, leagues: list[str]) -> dict[str, str]:
     """Seed teams and return mapping of external_id to internal UUID."""
     team_mapping = {}
-    teams_data = [
-        {
-            "external_id": "epl-001",
-            "provider": "api_sports",
-            "name": "Manchester City",
-            "short_name": "MCI",
-            "league": "premier_league",
-            "country": "England",
-        },
-        {
-            "external_id": "epl-002",
-            "provider": "api_sports",
-            "name": "Arsenal",
-            "short_name": "ARS",
-            "league": "premier_league",
-            "country": "England",
-        },
-        {
-            "external_id": "epl-003",
-            "provider": "api_sports",
-            "name": "Liverpool",
-            "short_name": "LIV",
-            "league": "premier_league",
-            "country": "England",
-        },
-        {
-            "external_id": "epl-004",
-            "provider": "api_sports",
-            "name": "Chelsea",
-            "short_name": "CHE",
-            "league": "premier_league",
-            "country": "England",
-        },
-        {
-            "external_id": "epl-005",
-            "provider": "api_sports",
-            "name": "Manchester United",
-            "short_name": "MUN",
-            "league": "premier_league",
-            "country": "England",
-        },
-    ]
+    teams_data = []
+
+    for league in leagues:
+        league_teams = TEAMS_BY_LEAGUE.get(league, [])
+        for team in league_teams:
+            teams_data.append(
+                {
+                    "external_id": team["external_id"],
+                    "provider": "api_sports",
+                    "name": team["name"],
+                    "short_name": team["short_name"],
+                    "league": league,
+                    "country": team["country"],
+                }
+            )
 
     async with db.session() as session:
         from models import Team
@@ -81,6 +131,18 @@ async def seed_teams(db: DatabaseClient, leagues: list[str]) -> dict[str, str]:
         for team_data in teams_data:
             if team_data["league"] not in leagues:
                 continue
+
+            existing = await session.execute(
+                select(Team).where(
+                    Team.external_id == team_data["external_id"],
+                    Team.provider == team_data["provider"],
+                )
+            )
+            existing_team = existing.scalar_one_or_none()
+            if existing_team is not None:
+                team_mapping[team_data["external_id"]] = str(existing_team.team_id)
+                continue
+
             team = Team(
                 team_id=uuid4(),
                 **team_data,
@@ -147,6 +209,14 @@ async def seed_matches(
 
     async with db.session() as session:
         for m_data in match_data:
+            existing = await session.execute(
+                select(Match).where(Match.external_id == m_data["external_id"])
+            )
+            existing_match = existing.scalar_one_or_none()
+            if existing_match is not None:
+                match_mapping[m_data["external_id"]] = str(existing_match.match_id)
+                continue
+
             match = Match(
                 match_id=uuid4(),
                 **m_data,
@@ -238,9 +308,9 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Seed database with historical data")
     parser.add_argument(
         "--leagues",
-        nargs="+",
-        default=["premier_league"],
-        help="Leagues to seed",
+        nargs="*",
+        default=[],
+        help="Leagues to seed (default: all from config/leagues.yaml)",
     )
     parser.add_argument(
         "--seasons",
@@ -249,6 +319,19 @@ async def main() -> None:
         help="Seasons to seed",
     )
     args = parser.parse_args()
+
+    if not args.leagues:
+        try:
+            from sports_common.league_config import get_league_config
+
+            config = get_league_config()
+            args.leagues = config.get_discovered_league_ids()
+            if not args.leagues:
+                args.leagues = ["premier_league"]
+                logger.warning("no_configured_leagues_using_default", default=args.leagues)
+        except Exception:
+            args.leagues = ["premier_league"]
+            logger.warning("config_load_failed_using_default", default=args.leagues)
 
     logger.info(
         "seeding_database",

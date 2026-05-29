@@ -69,54 +69,101 @@ class ModelPredictor:
                 )
                 return
 
-            if self._model_path and Path(self._model_path).exists():
-                model_path = Path(self._model_path)
+            if self._model_path:
+                # Try multiple path resolution strategies
+                predictor_dir = Path(__file__).resolve().parent
+                workspace_root = predictor_dir.parent.parent.parent  # src -> model_serving -> services -> workspace
+                
+                candidates = [
+                    Path(self._model_path),
+                    Path(self._model_path).resolve(),
+                    workspace_root / self._model_path,
+                    predictor_dir.parent / self._model_path,  # models/ relative to src/
+                ]
+                
+                model_path = None
+                for candidate in candidates:
+                    if candidate.exists():
+                        model_path = candidate
+                        logger.info(
+                            "model_path_resolved",
+                            candidate=str(model_path),
+                        )
+                        break
+                
+                if not model_path:
+                    logger.warning(
+                        "model_path_not_found",
+                        model_path=self._model_path,
+                        candidates=[str(c) for c in candidates],
+                    )
 
-                try:
-                    import joblib
+                if model_path:
+                    logger.debug(
+                        "attempting_model_load",
+                        model_path=str(model_path),
+                    )
 
-                    self._model = joblib.load(model_path)
-                    self._is_loaded = True
-                    self._model_version = os.getenv("MODEL_VERSION", "local-artifact")
-                    logger.info(
-                        "model_loaded_from_joblib",
+                    try:
+                        import joblib
+
+                        self._model = joblib.load(model_path)
+                        self._is_loaded = True
+                        self._model_version = os.getenv("MODEL_VERSION", "local-artifact")
+                        logger.info(
+                            "model_loaded_from_joblib",
+                            model_name=self._model_name,
+                            model_path=str(model_path),
+                        )
+                        return
+                    except Exception as je:
+                        logger.debug(
+                            "joblib_load_failed",
+                            model_name=self._model_name,
+                            error=str(je),
+                        )
+
+                    try:
+                        import xgboost as xgb
+                        import json
+
+                        booster = xgb.Booster()
+                        booster.load_model(str(model_path))
+                        
+                        # Load metadata if available
+                        metadata_path = model_path.with_suffix(".json")
+                        if metadata_path.exists():
+                            metadata = json.loads(metadata_path.read_text())
+                            self._feature_names = metadata.get("feature_names", [])
+                        
+                        self._model = booster
+                        self._is_loaded = True
+                        self._model_version = os.getenv("MODEL_VERSION", "local-xgboost")
+                        logger.info(
+                            "model_loaded_from_xgboost",
+                            model_name=self._model_name,
+                            model_path=str(model_path),
+                        )
+                        return
+                    except Exception as e:
+                        logger.debug(
+                            "xgboost_load_failed",
+                            model_name=self._model_name,
+                            model_path=str(model_path),
+                            error=str(e),
+                        )
+                        pass
+
+                    logger.warning(
+                        "model_load_local_failed",
                         model_name=self._model_name,
                         model_path=str(model_path),
                     )
-                    return
-                except Exception:
-                    pass
-
-                try:
-                    import xgboost as xgb
-                    import json
-
-                    booster = xgb.Booster()
-                    booster.load_model(str(model_path))
-                    
-                    # Load metadata if available
-                    metadata_path = model_path.with_suffix(".json")
-                    if metadata_path.exists():
-                        metadata = json.loads(metadata_path.read_text())
-                        self._feature_names = metadata.get("feature_names", [])
-                    
-                    self._model = booster
-                    self._is_loaded = True
-                    self._model_version = os.getenv("MODEL_VERSION", "local-xgboost")
-                    logger.info(
-                        "model_loaded_from_xgboost",
-                        model_name=self._model_name,
-                        model_path=str(model_path),
+                else:
+                    logger.warning(
+                        "model_path_not_resolved",
+                        model_path=self._model_path,
                     )
-                    return
-                except Exception:
-                    pass
-
-                logger.warning(
-                    "model_load_local_failed",
-                    model_name=self._model_name,
-                    model_path=str(model_path),
-                )
 
             self._model = None
             self._is_loaded = False

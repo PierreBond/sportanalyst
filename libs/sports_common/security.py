@@ -20,6 +20,10 @@ RATE_LIMIT_WINDOW = 60
 CORS_ORIGINS = [
     "https://sports-prediction.example.com",
     "https://dashboard.sports-prediction.example.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
 ]
 
 AUTH_BYPASS_PATHS = frozenset(
@@ -81,6 +85,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         if request.url.path in AUTH_BYPASS_PATHS or request.url.path.startswith("/health"):
             return await call_next(request)
 
@@ -129,8 +136,9 @@ def setup_security(app: FastAPI, require_auth: bool = True) -> None:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-API-Key"],
         max_age=600,
     )

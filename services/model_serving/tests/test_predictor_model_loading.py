@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 
-from predictor import ModelPredictor
+from services.model_serving.src.predictor import ModelPredictor
 
 
 def test_predictor_falls_back_to_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:

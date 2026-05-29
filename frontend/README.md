@@ -124,6 +124,7 @@ Connects to backend at `NEXT_PUBLIC_API_URL` (default: `http://localhost:8004`)
 | Variable | Default | Description |
 |:---|:---|:---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8004` | Backend API base URL |
+| `NEXT_PUBLIC_API_KEY` | `` | Optional API key sent as `X-API-Key` header |
 
 ## Stack
 

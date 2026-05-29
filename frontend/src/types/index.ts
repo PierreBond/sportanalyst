@@ -112,3 +112,12 @@ export interface MatchResearchSnapshot {
   value_bets: ValueBet[];
   shap_explanation: SHAPExplanation;
 }
+
+export interface UpcomingMatch {
+  match_id: string;
+  home_team: string;
+  away_team: string;
+  league: string;
+  scheduled_at: string;
+  status: string;
+}

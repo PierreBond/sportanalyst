@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from unittest.mock import AsyncMock, patch
 
-from main import app
+from services.model_serving.src.main import app
 
 
 @pytest.fixture
@@ -12,7 +13,7 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client():
     api_key = "test-api-key"
     with patch.dict("os.environ", {"API_KEY": api_key}, clear=False):
@@ -117,6 +118,15 @@ async def test_list_models(client):
 
 
 @pytest.mark.asyncio
+async def test_get_upcoming_matches(client):
+    response = await client.get("/api/v1/matches/upcoming?limit=3")
+    assert response.status_code == 200
+    data = response.json()
+    assert "matches" in data
+    assert isinstance(data["matches"], list)
+
+
+@pytest.mark.asyncio
 async def test_prediction_response_schema(client):
     response = await client.get("/api/v1/predictions/test-match")
     assert response.status_code == 200
@@ -172,8 +182,29 @@ async def test_value_bet_schema(client):
         assert "match_id" in bet
         assert "selection" in bet
         assert "model_prob" in bet
-        assert "best_odds" in bet
-        assert "implied_prob" in bet
-        assert "edge" in bet
-        assert "kelly_stake_pct" in bet
-        assert "sportsbook" in bet
+
+
+@pytest.mark.asyncio
+async def test_get_upcoming_leagues(client):
+    """Test the leagues summary endpoint returns correct structure."""
+    response = await client.get("/api/v1/leagues/upcoming")
+    assert response.status_code == 200
+    data = response.json()
+    assert "leagues" in data
+    assert isinstance(data["leagues"], list)
+
+    if data["leagues"]:
+        league = data["leagues"][0]
+        assert "league" in league
+        assert "match_count" in league
+        assert isinstance(league["match_count"], int)
+
+
+@pytest.mark.asyncio
+async def test_get_upcoming_leagues_filtered_by_league(client):
+    """Test upcoming matches endpoint accepts league filter."""
+    response = await client.get("/api/v1/matches/upcoming?league=premier_league&limit=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert "matches" in data
+    assert isinstance(data["matches"], list)

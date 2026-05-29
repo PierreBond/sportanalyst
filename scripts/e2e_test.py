@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from datetime import datetime
 from typing import Any
 
@@ -15,8 +16,9 @@ logger = get_logger(__name__)
 
 
 class E2ETest:
-    def __init__(self, base_url: str = "http://localhost:8004") -> None:
+    def __init__(self, base_url: str = "http://localhost:8004", api_key: str | None = None) -> None:
         self._base_url = base_url
+        self._api_key = api_key
         self._results: dict[str, Any] = {
             "started_at": datetime.now().isoformat(),
             "tests": [],
@@ -24,11 +26,17 @@ class E2ETest:
             "failed": 0,
         }
 
+    def _build_client(self, timeout: float) -> httpx.AsyncClient:
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["X-API-Key"] = self._api_key
+        return httpx.AsyncClient(base_url=self._base_url, timeout=timeout, headers=headers)
+
     async def test_health_endpoint(self) -> dict[str, Any]:
         result = {"name": "health_endpoint", "passed": False, "details": {}}
 
         try:
-            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+            async with self._build_client(timeout=10.0) as client:
                 response = await client.get("/health")
 
                 result["details"]["status_code"] = response.status_code
@@ -48,7 +56,7 @@ class E2ETest:
         result = {"name": "prediction_flow", "passed": False, "details": {}}
 
         try:
-            async with httpx.AsyncClient(base_url=self._base_url, timeout=30.0) as client:
+            async with self._build_client(timeout=30.0) as client:
                 response = await client.get("/api/v1/predictions/e2e-test-match")
 
                 result["details"]["status_code"] = response.status_code
@@ -78,7 +86,7 @@ class E2ETest:
         result = {"name": "batch_prediction", "passed": False, "details": {}}
 
         try:
-            async with httpx.AsyncClient(base_url=self._base_url, timeout=30.0) as client:
+            async with self._build_client(timeout=30.0) as client:
                 payload = {
                     "matches": [
                         {"match_id": "e2e-1", "home_team": "Team A", "away_team": "Team B"},
@@ -106,7 +114,7 @@ class E2ETest:
         result = {"name": "value_bets", "passed": False, "details": {}}
 
         try:
-            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+            async with self._build_client(timeout=10.0) as client:
                 response = await client.get("/api/v1/value-bets")
 
                 result["details"]["status_code"] = response.status_code
@@ -125,7 +133,7 @@ class E2ETest:
         result = {"name": "report_generation", "passed": False, "details": {}}
 
         try:
-            async with httpx.AsyncClient(base_url=self._base_url, timeout=30.0) as client:
+            async with self._build_client(timeout=30.0) as client:
                 response = await client.get("/api/v1/reports/e2e-test-match")
 
                 result["details"]["status_code"] = response.status_code
@@ -156,7 +164,7 @@ class E2ETest:
         result = {"name": "models_endpoint", "passed": False, "details": {}}
 
         try:
-            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+            async with self._build_client(timeout=10.0) as client:
                 response = await client.get("/models")
 
                 result["details"]["status_code"] = response.status_code
@@ -175,7 +183,7 @@ class E2ETest:
         result = {"name": "calibrator_fit", "passed": False, "details": {}}
 
         try:
-            async with httpx.AsyncClient(base_url=self._base_url, timeout=30.0) as client:
+            async with self._build_client(timeout=30.0) as client:
                 payload = {
                     "probs": [
                         [0.5, 0.3, 0.2],
@@ -251,10 +259,15 @@ async def main() -> None:
         action="store_true",
         help="Print human-readable summary to stdout (default: CI mode emits structured logs)",
     )
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv("E2E_API_KEY"),
+        help="Optional API key for authenticated endpoints (or set E2E_API_KEY)",
+    )
 
     args = parser.parse_args()
 
-    tester = E2ETest(base_url=args.url)
+    tester = E2ETest(base_url=args.url, api_key=args.api_key)
     results = await tester.run_all_tests()
 
     if args.pretty:

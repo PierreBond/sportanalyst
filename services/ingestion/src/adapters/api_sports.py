@@ -26,7 +26,13 @@ class APISportsAdapter(BaseAdapter):
             api_key=api_key,
             timeout=15.0,
         )
-        self._headers["x-apisports-key"] = api_key
+
+    def _get_headers(self) -> dict[str, str]:
+        # API-SPORTS uses x-apisports-key instead of bearer tokens.
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["x-apisports-key"] = self._api_key
+        return headers
 
     async def fetch_live_events(self, league: str) -> AsyncIterator[MatchEvent]:
         """Stream live match events for a given league."""

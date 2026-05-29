@@ -25,13 +25,13 @@ export default function RootLayout({
               </div>
               <div className="flex items-center space-x-4">
                 <Link href="/" className="text-gray-600 hover:text-gray-900">
-                  Dashboard
+                  Overview
                 </Link>
                 <Link href="/matches" className="text-gray-600 hover:text-gray-900">
-                  Matches
+                  Live Matches
                 </Link>
                 <Link href="/market" className="text-gray-600 hover:text-gray-900">
-                  Market
+                  Live Market
                 </Link>
                 <Link href="/reports" className="text-gray-600 hover:text-gray-900">
                   Reports
