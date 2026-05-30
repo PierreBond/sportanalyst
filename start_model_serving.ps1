@@ -3,6 +3,7 @@ $env:PYTHONPATH = "$root\libs;$root\services\model_serving\src"
 $env:DATABASE_URL = "postgresql+asyncpg://user:pass@localhost:5432/sportspred"
 $env:DATABASE_URL_SYNC = "postgresql://user:pass@localhost:5432/sportspred"
 $env:API_KEY = "dev-key-123"
+$env:MODEL_PATH = "$root\models\predictor.joblib"
 Set-Location $root\services\model_serving
 Write-Host "Model-serving service starting on http://localhost:8004" -ForegroundColor Green
 Write-Host "Press Ctrl+C to stop" -ForegroundColor Yellow

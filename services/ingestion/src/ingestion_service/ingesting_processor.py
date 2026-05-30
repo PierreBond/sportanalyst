@@ -268,18 +268,19 @@ class IngestingLeagueProcessor:
         offset: int,
         limit: int,
     ) -> list[dict]:
-        """Fetch from API-SPORTS with season and fallback strategies."""
-        try:
-            fixtures = await self._try_season(adapter, league_id, season, offset, limit)
-            if not fixtures:
-                fallback = str(int(season) - 1)
-                logger.info("season_no_data_trying_fallback", league=league_id, season=season, fallback=fallback)
+        """Fetch from API-SPORTS across multiple seasons."""
+        all_fixtures = []
+        seasons_to_try = ["2024", "2023", "2022"]
+        for s in seasons_to_try:
+            try:
+                fixtures = await self._try_season(adapter, league_id, s, offset, limit)
+                if fixtures:
+                    logger.info("season_data_fetched", league=league_id, season=s, count=len(fixtures))
+                    all_fixtures.extend(fixtures)
                 await asyncio.sleep(0.3)
-                fixtures = await self._try_season(adapter, league_id, fallback, offset, limit)
-            return fixtures
-        except Exception as e:
-            logger.error("api_sports_fetch_failed", error=str(e))
-            return []
+            except Exception as e:
+                logger.warning("season_fetch_skipped", league=league_id, season=s, error=str(e))
+        return all_fixtures
 
     async def _try_season(
         self, adapter: APISportsAdapter, league_id: str, season: str, offset: int, limit: int
@@ -296,6 +297,7 @@ class IngestingLeagueProcessor:
         return [
             {
                 "external_id": f"api_sports_{f.get('fixture', {}).get('id', '')}",
+                "season": str(f.get("league", {}).get("season", "")),
                 "league": f.get("league", {}).get("name", ""),
                 "home_team": f.get("teams", {}).get("home", {}).get("name", ""),
                 "away_team": f.get("teams", {}).get("away", {}).get("name", ""),
@@ -303,6 +305,8 @@ class IngestingLeagueProcessor:
                 "away_team_external_id": f"api_sports_{f.get('teams', {}).get('away', {}).get('id', '')}",
                 "home_score": f.get("score", {}).get("fulltime", {}).get("home"),
                 "away_score": f.get("score", {}).get("fulltime", {}).get("away"),
+                "home_halftime_score": f.get("score", {}).get("halftime", {}).get("home"),
+                "away_halftime_score": f.get("score", {}).get("halftime", {}).get("away"),
                 "scheduled_at": f.get("fixture", {}).get("date", ""),
                 "status": f.get("fixture", {}).get("status", {}).get("short", ""),
                 "venue": f.get("fixture", {}).get("venue", {}).get("name", ""),
@@ -460,17 +464,20 @@ class IngestingLeagueProcessor:
                             INSERT INTO matches (
                                 match_id, external_id, provider, league, season, round,
                                 home_team_id, away_team_id, scheduled_at, venue, status,
-                                home_score, away_score
+                                home_score, away_score, home_halftime_score, away_halftime_score
                             )
                             VALUES (
                                 gen_random_uuid(), :external_id, :provider, :league, :season,
                                 :round, :home_team_id, :away_team_id, :scheduled_at, :venue,
-                                :status, :home_score, :away_score
+                                :status, :home_score, :away_score,
+                                :home_halftime_score, :away_halftime_score
                             )
                             ON CONFLICT (external_id, provider) DO UPDATE SET
                                 status = EXCLUDED.status,
                                 home_score = COALESCE(EXCLUDED.home_score, matches.home_score),
                                 away_score = COALESCE(EXCLUDED.away_score, matches.away_score),
+                                home_halftime_score = COALESCE(EXCLUDED.home_halftime_score, matches.home_halftime_score),
+                                away_halftime_score = COALESCE(EXCLUDED.away_halftime_score, matches.away_halftime_score),
                                 updated_at = NOW()
                             WHERE matches.status IN ('scheduled', 'postponed')
                         """),
@@ -478,7 +485,7 @@ class IngestingLeagueProcessor:
                             "external_id": external_id,
                             "provider": provider,
                             "league": league_id,
-                            "season": f"{datetime.now().year - 1}-{datetime.now().year}",
+                            "season": match.get("season", ""),
                             "round": match.get("round", ""),
                             "home_team_id": home_team_id,
                             "away_team_id": away_team_id,
@@ -487,6 +494,8 @@ class IngestingLeagueProcessor:
                             "status": match.get("status", "scheduled"),
                             "home_score": match.get("home_score"),
                             "away_score": match.get("away_score"),
+                            "home_halftime_score": match.get("home_halftime_score"),
+                            "away_halftime_score": match.get("away_halftime_score"),
                         },
                     )
                     saved += 1

@@ -72,6 +72,8 @@ class Match(Base):
     status: Mapped[str] = mapped_column(String(20), default="scheduled")
     home_score: Mapped[int | None] = mapped_column(SmallInteger)
     away_score: Mapped[int | None] = mapped_column(SmallInteger)
+    home_halftime_score: Mapped[int | None] = mapped_column(SmallInteger)
+    away_halftime_score: Mapped[int | None] = mapped_column(SmallInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow

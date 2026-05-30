@@ -164,6 +164,10 @@ _betting_engine: BettingEngine | None = None
 _explainer: PredictionExplainer | None = None
 _predictor: ModelPredictor | None = None
 
+# Loaded from metadata at startup for feature encoding
+_team_to_idx: dict[str, int] = {}
+_league_to_idx: dict[str, int] = {}
+
 
 async def get_optional_db() -> AsyncGenerator[AsyncSession | None, None]:
     """Yield a database session when available; otherwise yield None.
@@ -243,8 +247,21 @@ async def lifespan(app: FastAPI):
 
     _betting_engine = BettingEngine()
 
+    global _team_to_idx, _league_to_idx
+
     _predictor = ModelPredictor()
     _predictor.load_model()
+
+    # Load feature encoding metadata for _build_features_for_match
+    meta_path = Path(__file__).resolve().parent.parent / "models" / "predictor_metadata.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+            _team_to_idx = {name: i for i, name in enumerate(meta.get("team_classes", []))}
+            _league_to_idx = {name: i for i, name in enumerate(meta.get("league_classes", []))}
+            logger.info("feature_metadata_loaded", teams=len(_team_to_idx), leagues=len(_league_to_idx))
+        except Exception as e:
+            logger.warning("feature_metadata_load_failed", error=str(e))
 
     if _require_loaded_model() and not _predictor.is_loaded:
         raise RuntimeError(
@@ -456,24 +473,55 @@ async def _fetch_match_context(
         return None
 
 
-def _build_features_for_match(match_id: str, db: AsyncSession | None) -> list[float]:
-    """Build a feature vector for the match predictor.
+async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> dict[str, float]:
+    """Build a feature dict for the match predictor.
 
-    Returns a feature vector with normalized values for the model.
-    If data is unavailable, returns baseline features.
+    Queries the match's home/away teams and league, encodes them,
+    and returns a dict matching the trained model's feature names.
+    Falls back to neutral values when data is unavailable.
     """
-    # Baseline features: these match the model's expected input shape
-    # Features: [home_strength, away_strength, recency, league_encoded]
-    # (Adjust based on your actual model training features)
+    features = {
+        "home_team_encoded": 0.0,
+        "away_team_encoded": 0.0,
+        "league_encoded": 0.0,
+        "season": 2024.0,
+    }
 
-    features = [
-        0.5,  # home_strength (baseline)
-        0.5,  # away_strength (baseline)
-        1.0,  # recency (recent match, normalized)
-        0.1,  # league_encoded (premier_league = 0.1)
-        0.0,  # head_to_head_advantage (neutral)
-        0.0,  # home_advantage_factor (normalized)
-    ]
+    if db is None:
+        return features
+
+    try:
+        result = await db.execute(
+            text(
+                """
+                SELECT
+                    ht.name AS home_team,
+                    at.name AS away_team,
+                    m.league,
+                    m.season
+                FROM matches m
+                LEFT JOIN teams ht ON ht.team_id = m.home_team_id
+                LEFT JOIN teams at ON at.team_id = m.away_team_id
+                WHERE m.match_id::text = :match_id
+                   OR m.external_id = :match_id
+                LIMIT 1
+                """
+            ),
+            {"match_id": match_id},
+        )
+        row = result.mappings().first()
+        if row:
+            home_team = row.get("home_team", "")
+            away_team = row.get("away_team", "")
+            league = row.get("league", "")
+            season = row.get("season", 2024)
+
+            features["home_team_encoded"] = float(_team_to_idx.get(home_team, 0))
+            features["away_team_encoded"] = float(_team_to_idx.get(away_team, 0))
+            features["league_encoded"] = float(_league_to_idx.get(league, 0))
+            features["season"] = float(season)
+    except Exception as e:
+        logger.warning("feature_build_failed", match_id=match_id, error=str(e))
 
     return features
 
@@ -506,16 +554,16 @@ async def _generate_prediction(
 ) -> dict[str, Any]:
     """Generate prediction for a match using the loaded model."""
 
-    # Build feature vector from match data
-    features = _build_features_for_match(match_id, db)
+    # Build feature dict from match data
+    features = await _build_features_for_match(match_id, db)
 
     if _predictor and _predictor.is_loaded:
         try:
-            raw_probs = _predictor.predict([features])
+            raw_probs = _predictor.predict(features)
             home_win_prob, draw_prob, away_win_prob = (
-                float(raw_probs[0][0]),
-                float(raw_probs[0][1]),
-                float(raw_probs[0][2]),
+                float(raw_probs[0]),
+                float(raw_probs[1]),
+                float(raw_probs[2]),
             )
         except Exception as e:
             logger.warning("prediction_model_error", match_id=match_id, error=str(e))
