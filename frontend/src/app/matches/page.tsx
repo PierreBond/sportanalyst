@@ -25,7 +25,7 @@ export default function MatchesPage() {
       try {
         const [leagueData, fixtures] = await Promise.all([
           getUpcomingLeagues(),
-          getUpcomingMatches(20, selectedLeague === "all" ? undefined : selectedLeague),
+          getUpcomingMatches(100, selectedLeague === "all" ? undefined : selectedLeague),
         ]);
 
         if (leagueData.leagues.length === 0) {

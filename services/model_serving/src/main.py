@@ -743,7 +743,7 @@ async def list_models() -> dict[str, Any]:
 
 @app.get("/api/v1/matches/upcoming", response_model=UpcomingMatchesResponse)
 async def get_upcoming_matches(
-    limit: int = Query(default=12, ge=1, le=50),
+    limit: int = Query(default=12, ge=1, le=250),
     league: str | None = Query(default=None),
     db: AsyncSession | None = Depends(get_optional_db),
 ) -> UpcomingMatchesResponse:

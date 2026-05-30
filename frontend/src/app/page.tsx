@@ -17,11 +17,11 @@ export default function HomePage() {
     async function loadOverviewData() {
       setLoading(true);
       try {
-        const fixtures = await getUpcomingMatches(12);
+        const fixtures = await getUpcomingMatches(100);
         setUpcomingMatches(fixtures.matches);
 
         const predictionResults = await Promise.allSettled(
-          fixtures.matches.slice(0, 6).map((match) => getPrediction(match.match_id))
+          fixtures.matches.map((match) => getPrediction(match.match_id))
         );
 
         const livePredictions = predictionResults
@@ -122,7 +122,7 @@ export default function HomePage() {
           <div className="px-6 py-8 text-gray-500">No upcoming matches returned by backend.</div>
         ) : (
           <div className="divide-y divide-gray-200">
-            {upcomingMatches.slice(0, 8).map((match) => {
+            {upcomingMatches.map((match) => {
               const prediction = predictionByMatchId.get(match.match_id);
               return (
                 <div key={match.match_id} className="px-6 py-4">

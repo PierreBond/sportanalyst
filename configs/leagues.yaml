@@ -108,6 +108,14 @@ leagues:
       api_sports: 28
     country: USA
 
+  brasileirao:
+    display_name: Brasileirão
+    enabled: true
+    sport: football
+    provider_league_ids:
+      footballdata: BSA
+    country: Brazil
+
 # League processing order (for priority in UI)
 processing_order:
   - premier_league
