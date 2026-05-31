@@ -9,8 +9,9 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import GradientBoostingClassifier
 import joblib
 
-os.environ["DATABASE_URL"] = "postgresql+asyncpg://user:pass@localhost:5432/sportspred"
-os.environ["DATABASE_URL_SYNC"] = "postgresql://user:pass@localhost:5432/sportspred"
+from dotenv import load_dotenv
+load_dotenv()
+# Expect DATABASE_URL / DATABASE_URL_SYNC from .env or env vars
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "libs"))
 from sports_common.db import db_client

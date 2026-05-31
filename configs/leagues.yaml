@@ -113,6 +113,7 @@ leagues:
     enabled: true
     sport: football
     provider_league_ids:
+      api_sports: 71
       footballdata: BSA
     country: Brazil
 
@@ -124,6 +125,7 @@ processing_order:
   - serie_a
   - ligue_1
   - mls
+  - brasileirao
   - eredivisie
   - j1_league
   - nba

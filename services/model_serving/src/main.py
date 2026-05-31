@@ -253,7 +253,20 @@ async def lifespan(app: FastAPI):
     _predictor.load_model()
 
     # Load feature encoding metadata for _build_features_for_match
-    meta_path = Path(__file__).resolve().parent.parent / "models" / "predictor_metadata.json"
+    meta_path = None
+    if _predictor and _predictor._model_path:
+        mp = Path(_predictor._model_path)
+        candidates = [
+            mp.with_suffix(".json"),
+            mp.with_name("predictor_metadata.json"),
+            mp.parent / "predictor_metadata.json",
+        ]
+        for c in candidates:
+            if c.exists():
+                meta_path = c
+                break
+    if not meta_path:
+        meta_path = Path(__file__).resolve().parent.parent / "models" / "predictor_metadata.json"
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text())
