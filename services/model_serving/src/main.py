@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import unicodedata
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -167,6 +169,41 @@ _predictor: ModelPredictor | None = None
 # Loaded from metadata at startup for feature encoding
 _team_to_idx: dict[str, int] = {}
 _league_to_idx: dict[str, int] = {}
+_known_team_names: set[str] = set()
+
+# Team name normalization for cross-provider matching
+_TEAM_PREFIXES = ["SE ", "CR ", "CA ", "SC ", "EC ", "GR ", "AE ", "AD "]
+_TEAM_SUFFIXES = [" FC", " EC", " FR", " FBC", " FBPA", " AF"]
+_TEAM_REMOVALS = [" Paulista"]
+_TEAM_SPECIAL = {"ca mineiro": "Atletico-MG", "ca paranaense": "Atletico Paranaense"}
+
+
+def _remove_accents(text: str) -> str:
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+
+
+def _resolve_team_name(db_name: str, known: set[str]) -> str:
+    if not db_name or db_name in known:
+        return db_name
+    normalized = _remove_accents(db_name).lower().strip()
+    special = _TEAM_SPECIAL.get(normalized)
+    if special and special in known:
+        return special
+    for p in _TEAM_PREFIXES:
+        if db_name.startswith(p) and db_name[len(p):] in known:
+            return db_name[len(p):]
+    for s in _TEAM_SUFFIXES:
+        if db_name.endswith(s) and db_name[:-len(s)] in known:
+            return db_name[:-len(s)]
+    for r in _TEAM_REMOVALS:
+        candidate = db_name.replace(r, "")
+        if candidate in known:
+            return candidate
+    db_clean = normalized
+    for k in known:
+        if _remove_accents(k).lower().strip() == db_clean:
+            return k
+    return db_name
 
 
 async def get_optional_db() -> AsyncGenerator[AsyncSession | None, None]:
@@ -247,7 +284,7 @@ async def lifespan(app: FastAPI):
 
     _betting_engine = BettingEngine()
 
-    global _team_to_idx, _league_to_idx
+    global _team_to_idx, _league_to_idx, _known_team_names
 
     _predictor = ModelPredictor()
     _predictor.load_model()
@@ -272,6 +309,7 @@ async def lifespan(app: FastAPI):
             meta = json.loads(meta_path.read_text())
             _team_to_idx = {name: i for i, name in enumerate(meta.get("team_classes", []))}
             _league_to_idx = {name: i for i, name in enumerate(meta.get("league_classes", []))}
+            _known_team_names = set(_team_to_idx.keys())
             logger.info("feature_metadata_loaded", teams=len(_team_to_idx), leagues=len(_league_to_idx))
         except Exception as e:
             logger.warning("feature_metadata_load_failed", error=str(e))
@@ -529,8 +567,8 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
             league = row.get("league", "")
             season = row.get("season", 2024)
 
-            features["home_team_encoded"] = float(_team_to_idx.get(home_team, 0))
-            features["away_team_encoded"] = float(_team_to_idx.get(away_team, 0))
+            features["home_team_encoded"] = float(_team_to_idx.get(_resolve_team_name(home_team, _known_team_names), 0))
+            features["away_team_encoded"] = float(_team_to_idx.get(_resolve_team_name(away_team, _known_team_names), 0))
             features["league_encoded"] = float(_league_to_idx.get(league, 0))
             features["season"] = float(season)
     except Exception as e:
