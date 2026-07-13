@@ -524,57 +524,168 @@ async def _fetch_match_context(
         return None
 
 
+SQL_ROLLING = """
+    WITH g AS (
+        SELECT scheduled_at,
+            CASE WHEN home_team_id = :tid THEN home_score ELSE away_score END AS scored,
+            CASE WHEN home_team_id = :tid THEN away_score ELSE home_score END AS conceded,
+            CASE
+                WHEN (home_team_id = :tid AND home_score > away_score)
+                  OR (away_team_id = :tid AND away_score > home_score) THEN 3.0
+                WHEN home_score = away_score THEN 1.0
+                ELSE 0.0
+            END AS points
+        FROM matches
+        WHERE (home_team_id = :tid OR away_team_id = :tid)
+          AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
+    )
+    SELECT AVG(scored) AS avg_scored, AVG(conceded) AS avg_conceded, AVG(points) AS avg_points
+    FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
+"""
+
+SQL_ROLLING_SIDE = """
+    WITH g AS (
+        SELECT scheduled_at, home_score AS scored, away_score AS conceded,
+            CASE WHEN home_score > away_score THEN 3.0 WHEN home_score = away_score THEN 1.0 ELSE 0.0 END AS points
+        FROM matches WHERE home_team_id = :tid AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
+    )
+    SELECT AVG(scored) AS avg_scored, AVG(conceded) AS avg_conceded, AVG(points) AS avg_points
+    FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
+"""
+
+SQL_ROLLING_SIDE_AWAY = """
+    WITH g AS (
+        SELECT scheduled_at, away_score AS scored, home_score AS conceded,
+            CASE WHEN away_score > home_score THEN 3.0 WHEN home_score = away_score THEN 1.0 ELSE 0.0 END AS points
+        FROM matches WHERE away_team_id = :tid AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
+    )
+    SELECT AVG(scored) AS avg_scored, AVG(conceded) AS avg_conceded, AVG(points) AS avg_points
+    FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
+"""
+
+SQL_LEAGUE_AVG = """
+    SELECT AVG(home_score + away_score) AS avg_total FROM matches
+    WHERE league = :league AND status = 'FT' AND home_score IS NOT NULL
+"""
+
+SQL_H2H = """
+    WITH h2h AS (
+        SELECT home_score, away_score, home_team_id, away_team_id, scheduled_at
+        FROM matches
+        WHERE ((home_team_id = :htid AND away_team_id = :atid)
+            OR (home_team_id = :atid AND away_team_id = :htid))
+          AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
+        ORDER BY scheduled_at DESC LIMIT 5
+    )
+    SELECT
+        AVG(CASE WHEN home_team_id = :htid THEN home_score ELSE away_score END) AS h_gf,
+        AVG(CASE WHEN away_team_id = :htid THEN away_score ELSE home_score END) AS h_conceded,
+        AVG(CASE
+            WHEN (home_team_id = :htid AND home_score > away_score)
+              OR (away_team_id = :htid AND away_score > home_score) THEN 1.0
+            WHEN home_score = away_score THEN 0.5
+            ELSE 0.0 END) AS h_win_rate
+    FROM h2h
+"""
+
+async def _team_rolling(team_id, match_date, db, sql, w=5):
+    r = (await db.execute(text(sql), {"tid": team_id, "md": match_date, "w": w})).mappings().first()
+    if r and r["avg_scored"] is not None:
+        return float(r["avg_scored"]), float(r["avg_conceded"]), float(r["avg_points"])
+    return 0.0, 0.0, 0.0
+
 async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> dict[str, float]:
-    """Build a feature dict for the match predictor.
-
-    Queries the match's home/away teams and league, encodes them,
-    and returns a dict matching the trained model's feature names.
-    Falls back to neutral values when data is unavailable.
-    """
-    features = {
-        "home_team_encoded": 0.0,
-        "away_team_encoded": 0.0,
-        "league_encoded": 0.0,
-        "season": 2024.0,
-    }
-
+    f = {k: 0.0 for k in [
+        "home_team_encoded", "away_team_encoded", "league_encoded",
+        "home_gf_avg_last3", "home_ga_avg_last3", "home_form_last3",
+        "home_gf_avg_last5", "home_ga_avg_last5", "home_form_last5",
+        "home_gf_avg_last10", "home_ga_avg_last10", "home_form_last10",
+        "away_gf_avg_last3", "away_ga_avg_last3", "away_form_last3",
+        "away_gf_avg_last5", "away_ga_avg_last5", "away_form_last5",
+        "away_gf_avg_last10", "away_ga_avg_last10", "away_form_last10",
+        "home_h_gf_avg_last5", "home_h_ga_avg_last5", "home_h_form_last5",
+        "away_a_gf_avg_last5", "away_a_ga_avg_last5", "away_a_form_last5",
+        "home_days_rest", "away_days_rest", "league_avg_total_goals",
+        "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins", "season",
+    ]}
     if db is None:
-        return features
-
+        return f
     try:
-        result = await db.execute(
-            text(
-                """
-                SELECT
-                    ht.name AS home_team,
-                    at.name AS away_team,
-                    m.league,
-                    m.season
-                FROM matches m
-                LEFT JOIN teams ht ON ht.team_id = m.home_team_id
-                LEFT JOIN teams at ON at.team_id = m.away_team_id
-                WHERE m.match_id::text = :match_id
-                   OR m.external_id = :match_id
-                LIMIT 1
-                """
-            ),
-            {"match_id": match_id},
-        )
-        row = result.mappings().first()
-        if row:
-            home_team = row.get("home_team", "")
-            away_team = row.get("away_team", "")
-            league = row.get("league", "")
-            season = row.get("season", 2024)
+        r = (await db.execute(text("""
+            SELECT ht.name AS home_team, at.name AS away_team,
+                   m.league, m.season, m.scheduled_at, m.home_team_id, m.away_team_id
+            FROM matches m
+            LEFT JOIN teams ht ON ht.team_id = m.home_team_id
+            LEFT JOIN teams at ON at.team_id = m.away_team_id
+            WHERE m.match_id::text = :match_id OR m.external_id = :match_id LIMIT 1
+        """), {"match_id": match_id})).mappings().first()
+        if not r:
+            return f
+        home_team = r.get("home_team", "")
+        away_team = r.get("away_team", "")
+        league = r.get("league", "")
+        season = r.get("season", 2024)
+        match_date = r.get("scheduled_at")
+        home_tid, away_tid = r.get("home_team_id"), r.get("away_team_id")
 
-            features["home_team_encoded"] = float(_team_to_idx.get(_resolve_team_name(home_team, _known_team_names), 0))
-            features["away_team_encoded"] = float(_team_to_idx.get(_resolve_team_name(away_team, _known_team_names), 0))
-            features["league_encoded"] = float(_league_to_idx.get(league, 0))
-            features["season"] = float(season)
+        f["home_team_encoded"] = float(_team_to_idx.get(_resolve_team_name(home_team, _known_team_names), 0))
+        f["away_team_encoded"] = float(_team_to_idx.get(_resolve_team_name(away_team, _known_team_names), 0))
+        f["league_encoded"] = float(_league_to_idx.get(league, 0))
+        f["season"] = float(season)
+
+        if not (match_date and home_tid and away_tid):
+            return f
+
+        # rolling all-games: windows 3, 5, 10
+        for w in [3, 5, 10]:
+            h_gf, h_ga, h_pt = await _team_rolling(home_tid, match_date, db, SQL_ROLLING, w)
+            a_gf, a_ga, a_pt = await _team_rolling(away_tid, match_date, db, SQL_ROLLING, w)
+            f[f"home_gf_avg_last{w}"] = h_gf
+            f[f"home_ga_avg_last{w}"] = h_ga
+            f[f"home_form_last{w}"] = h_pt
+            f[f"away_gf_avg_last{w}"] = a_ga
+            f[f"away_ga_avg_last{w}"] = a_gf
+            f[f"away_form_last{w}"] = a_pt
+
+        # home/away specific rolling
+        h_h_gf, h_h_ga, h_h_pt = await _team_rolling(home_tid, match_date, db, SQL_ROLLING_SIDE, 5)
+        f["home_h_gf_avg_last5"] = h_h_gf
+        f["home_h_ga_avg_last5"] = h_h_ga
+        f["home_h_form_last5"] = h_h_pt
+        a_a_gf, a_a_ga, a_a_pt = await _team_rolling(away_tid, match_date, db, SQL_ROLLING_SIDE_AWAY, 5)
+        f["away_a_gf_avg_last5"] = a_a_gf
+        f["away_a_ga_avg_last5"] = a_a_ga
+        f["away_a_form_last5"] = a_a_pt
+
+        # days since last match
+        for tid, side in [(home_tid, "home"), (away_tid, "away")]:
+            last = (await db.execute(text("""
+                SELECT scheduled_at FROM matches
+                WHERE (home_team_id = :tid OR away_team_id = :tid)
+                  AND scheduled_at < :md AND status = 'FT'
+                ORDER BY scheduled_at DESC LIMIT 1
+            """), {"tid": tid, "md": match_date})).mappings().first()
+            if last and last["scheduled_at"]:
+                days = (match_date - last["scheduled_at"]).total_seconds() / 86400
+                f[f"{side}_days_rest"] = max(1, min(30, days))
+            else:
+                f[f"{side}_days_rest"] = 7.0
+
+        # league context
+        lr = (await db.execute(text(SQL_LEAGUE_AVG), {"league": league})).mappings().first()
+        f["league_avg_total_goals"] = float(lr["avg_total"]) if lr and lr["avg_total"] else 2.5
+
+        # h2h
+        hr = (await db.execute(text(SQL_H2H), {"htid": home_tid, "atid": away_tid, "md": match_date})).mappings().first()
+        if hr and hr["h_gf"] is not None:
+            f["h2h_home_gf_avg"] = float(hr["h_gf"])
+            f["h2h_away_gf_avg"] = float(hr["h_conceded"])
+            f["h2h_home_wins"] = float(hr["h_win_rate"])
+        else:
+            f["h2h_home_wins"] = 0.5
     except Exception as e:
         logger.warning("feature_build_failed", match_id=match_id, error=str(e))
-
-    return features
+    return f
 
 
 def _generate_prediction_probabilities(match_id: str) -> tuple[float, float, float]:

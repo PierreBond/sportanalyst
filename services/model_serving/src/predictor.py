@@ -191,6 +191,10 @@ class ModelPredictor:
             feature_df = pd.DataFrame([features])
 
             if hasattr(self._model, "predict_proba"):
+                if hasattr(self._model, "get_booster"):
+                    model_features = self._model.get_booster().feature_names
+                    if model_features:
+                        feature_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_features}])
                 raw_probs = self._model.predict_proba(feature_df)
             elif hasattr(self._model, "predict"):
                 try:

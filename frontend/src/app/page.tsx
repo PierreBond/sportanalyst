@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { DataSourceBadge } from "@/components/DataSourceBadge";
-import { getPrediction, getUpcomingMatches, getValueBets } from "@/lib/api";
+import { getBatchPredictions, getUpcomingMatches, getValueBets } from "@/lib/api";
 import type { PredictionResponse, UpcomingMatch } from "@/types";
 
 export default function HomePage() {
@@ -20,16 +20,9 @@ export default function HomePage() {
         const fixtures = await getUpcomingMatches(100);
         setUpcomingMatches(fixtures.matches);
 
-        const predictionResults = await Promise.allSettled(
-          fixtures.matches.map((match) => getPrediction(match.match_id))
+        const { predictions: livePredictions } = await getBatchPredictions(
+          fixtures.matches.map((m) => m.match_id)
         );
-
-        const livePredictions = predictionResults
-          .filter(
-            (result): result is PromiseFulfilledResult<PredictionResponse> =>
-              result.status === "fulfilled"
-          )
-          .map((result) => result.value);
 
         setPredictions(livePredictions);
 

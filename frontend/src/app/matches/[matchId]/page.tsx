@@ -6,7 +6,7 @@ import { SHAPWaterfall } from "@/components/SHAPWaterfall";
 import { DataSourceBadge } from "@/components/DataSourceBadge";
 import { getPrediction, getWebSocketUrl } from "@/lib/api";
 import { useWebSocket } from "@/lib/ws";
-import type { PredictionResponse, LineMovement } from "@/types";
+import type { PredictionResponse } from "@/types";
 
 export default function MatchDetailPage() {
   const params = useParams();
@@ -15,8 +15,6 @@ export default function MatchDetailPage() {
   const [prediction, setPrediction] = useState<PredictionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lineMovement] = useState<LineMovement[]>([]);
-
   const { connect, disconnect, isConnected } = useWebSocket({
     onMessage: (message) => {
       if (message.type === "prediction_update" && message.probabilities) {
@@ -238,58 +236,6 @@ export default function MatchDetailPage() {
           )}
         </div>
       </div>
-
-      {lineMovement.length > 0 && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">
-            Line Movement
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                    Time
-                  </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                    Spread
-                  </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                    Total
-                  </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                    Home Odds
-                  </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                    Away Odds
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {lineMovement.map((item, index) => (
-                  <tr key={index} className={index === lineMovement.length - 1 ? "bg-blue-50" : ""}>
-                    <td className="px-4 py-2 text-sm text-gray-900">
-                      {new Date(item.timestamp).toLocaleTimeString()}
-                    </td>
-                    <td className="px-4 py-2 text-sm font-medium text-gray-900">
-                      {item.spread}
-                    </td>
-                    <td className="px-4 py-2 text-sm font-medium text-gray-900">
-                      {item.total}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-600">
-                      {item.home_odds.toFixed(2)}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-600">
-                      {item.away_odds.toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

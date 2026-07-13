@@ -14,9 +14,6 @@ const config: Config = {
         warning: '#f59e0b',
         danger: '#ef4444',
       },
-      animation: {
-        pulse: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-      },
     },
   },
   plugins: [],

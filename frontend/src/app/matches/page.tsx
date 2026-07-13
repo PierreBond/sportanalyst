@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getPrediction, getUpcomingLeagues, getUpcomingMatches } from "@/lib/api";
+import { getBatchPredictions, getUpcomingLeagues, getUpcomingMatches } from "@/lib/api";
 import { PredictionCard } from "@/components/PredictionCard";
 import { DataSourceBadge } from "@/components/DataSourceBadge";
 import type { PredictionResponse } from "@/types";
@@ -49,10 +49,7 @@ export default function MatchesPage() {
           return;
         }
 
-        const results = await Promise.allSettled(matchIds.map((id) => getPrediction(id)));
-        const loaded = results
-          .filter((r): r is PromiseFulfilledResult<PredictionResponse> => r.status === "fulfilled")
-          .map((r) => r.value);
+        const { predictions: loaded } = await getBatchPredictions(matchIds);
 
         setPredictions(loaded);
         setError(loaded.length === 0 ? "No live predictions returned by backend" : null);

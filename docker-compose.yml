@@ -1,4 +1,5 @@
 services:
+  # ── Infrastructure ──────────────────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     hostname: zookeeper
@@ -73,6 +74,160 @@ services:
       --port 5000
       --backend-store-uri sqlite:////mlruns/mlflow.db
       --default-artifact-root /mlruns
+
+  # ── Application Services ────────────────────────────────
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+    hostname: ingestion
+    container_name: sports-ingestion
+    ports:
+      - "8001:8001"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
+      DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  nlp-service:
+    build:
+      context: .
+      dockerfile: services/nlp_service/Dockerfile
+    hostname: nlp-service
+    container_name: sports-nlp-service
+    ports:
+      - "8002:8002"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
+      DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  biometric-service:
+    build:
+      context: .
+      dockerfile: services/biometric_service/Dockerfile
+    hostname: biometric-service
+    container_name: sports-biometric-service
+    ports:
+      - "8003:8003"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
+      DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  model-serving:
+    build:
+      context: .
+      dockerfile: services/model_serving/Dockerfile
+    hostname: model-serving
+    container_name: sports-model-serving
+    ports:
+      - "8004:8004"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
+      DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    depends_on:
+      postgres:
+        condition: service_started
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_started
+      mlflow:
+        condition: service_started
+    volumes:
+      - ./models:/app/models
+
+  reporting-service:
+    build:
+      context: .
+      dockerfile: services/reporting_service/Dockerfile
+    hostname: reporting-service
+    container_name: sports-reporting-service
+    ports:
+      - "8005:8005"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
+      DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  feature-engine:
+    build:
+      context: .
+      dockerfile: services/feature_engine/Dockerfile
+    hostname: feature-engine
+    container_name: sports-feature-engine
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
+      DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_started
+      kafka:
+        condition: service_started
+    profiles:
+      - feature-engine
+    restart: "no"
+
+  model-training:
+    build:
+      context: .
+      dockerfile: services/model_training/Dockerfile
+    hostname: model-training
+    container_name: sports-model-training
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
+      DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    depends_on:
+      postgres:
+        condition: service_started
+      mlflow:
+        condition: service_started
+    volumes:
+      - ./models:/app/models
+    profiles:
+      - training
+    restart: "no"
 
 volumes:
   zookeeper_data:

@@ -45,33 +45,6 @@ export interface SHAPDriver {
   label: string;
 }
 
-export interface BiometricData {
-  player_id: string;
-  player_name: string;
-  acwr: number;
-  hrv: number;
-  resting_hr: number;
-  sleep_score: number;
-  injury_risk: number;
-}
-
-export interface SentimentData {
-  entity_type: "team" | "player";
-  entity_id: string;
-  score: number;
-  volume: number;
-  source: string;
-  captured_at: string;
-}
-
-export interface LineMovement {
-  timestamp: string;
-  spread: number;
-  total: number;
-  home_odds: number;
-  away_odds: number;
-}
-
 export interface WebSocketMessage {
   type: "prediction_update" | "error";
   match_id?: string;
@@ -88,13 +61,6 @@ export interface HealthResponse {
   status: "healthy" | "unhealthy";
   service: string;
   version?: string;
-}
-
-export interface ModelInfo {
-  name: string;
-  version: string;
-  created_at: string;
-  status: "staging" | "production";
 }
 
 export interface MatchResearchSnapshot {
