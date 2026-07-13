@@ -5,7 +5,6 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, brier_score_loss
 import xgboost as xgb
@@ -110,10 +109,30 @@ def engineer_features(df):
     for c in h2h_df.columns:
         df[c] = df["match_id"].map(h2h_df[c]).fillna(0)
 
+    # Elo ratings (sequential, chronological)
+    ELO_K = 32
+    ELO_HOME_ADV = 100
+    elo = {}
+    elo_ratings = []
+    for _, row in df.iterrows():
+        ht, at = row["home_team_id"], row["away_team_id"]
+        elo_h = elo.get(ht, 1500) + ELO_HOME_ADV
+        elo_a = elo.get(at, 1500)
+        e_h = 1 / (1 + 10 ** ((elo_a - elo_h) / 400))
+        e_a = 1 - e_h
+        s_h = 1 if row["home_score"] > row["away_score"] else (0.5 if row["home_score"] == row["away_score"] else 0)
+        s_a = 1 - s_h
+        elo[ht] = elo.get(ht, 1500) + ELO_K * (s_h - e_h)
+        elo[at] = elo.get(at, 1500) + ELO_K * (s_a - e_a)
+        elo_ratings.append({"match_id": row["match_id"], "home_elo": elo_h, "away_elo": elo_a, "elo_diff": elo_h - elo_a})
+    elo_df = pd.DataFrame(elo_ratings).set_index("match_id")
+    for c in elo_df.columns:
+        df[c] = df["match_id"].map(elo_df[c]).fillna(0)
+
     df["target"] = df.apply(
         lambda r: 0 if r["home_score"] > r["away_score"]
                   else (1 if r["home_score"] == r["away_score"] else 2), axis=1)
-    return df
+    return df, elo_df
 
 FEATURES = [
     "home_team_encoded", "away_team_encoded", "league_encoded",
@@ -129,12 +148,13 @@ FEATURES = [
     "league_avg_total_goals",
     "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins",
     "season",
+    "home_elo", "away_elo", "elo_diff",
 ]
 
 def main():
     df = load_data()
     print(f"Loaded {len(df)} matches")
-    df = engineer_features(df)
+    df, elo_df = engineer_features(df)
     df = df.dropna(subset=["target"])
     print(f"After features: {len(df)} matches")
     print(f"Target distribution: {df['target'].value_counts().to_dict()}")
@@ -154,15 +174,26 @@ def main():
     X = X[FEATURES]
     y = df["target"]
 
+    # extract final Elo ratings for each team from the last match they played
+    team_elos = {}
+    for _, row in df.iterrows():
+        team_elos[row["home_team"]] = row["home_elo"]
+        team_elos[row["away_team"]] = row["away_elo"]
+
     metadata = {
         "feature_names": list(X.columns),
         "team_classes": le_team.classes_.tolist(),
         "league_classes": le_league.classes_.tolist(),
         "target_names": ["home_win", "draw", "away_win"],
+        "team_elos": {name: team_elos.get(name, 1500) for name in le_team.classes_},
     }
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y)
+    # time-based split: train on older matches, test on recent
+    split_date = df["scheduled_at"].quantile(0.8)
+    train_idx = df["scheduled_at"] < split_date
+    test_idx = df["scheduled_at"] >= split_date
+    X_train, X_test = X[train_idx], X[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
 
     model = xgb.XGBClassifier(
         n_estimators=600, max_depth=6, learning_rate=0.03,

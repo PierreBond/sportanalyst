@@ -170,6 +170,7 @@ _predictor: ModelPredictor | None = None
 _team_to_idx: dict[str, int] = {}
 _league_to_idx: dict[str, int] = {}
 _known_team_names: set[str] = set()
+_team_elos: dict[str, float] = {}
 
 # Team name normalization for cross-provider matching
 _TEAM_PREFIXES = ["SE ", "CR ", "CA ", "SC ", "EC ", "GR ", "AE ", "AD "]
@@ -284,7 +285,7 @@ async def lifespan(app: FastAPI):
 
     _betting_engine = BettingEngine()
 
-    global _team_to_idx, _league_to_idx, _known_team_names
+    global _team_to_idx, _league_to_idx, _known_team_names, _team_elos
 
     _predictor = ModelPredictor()
     _predictor.load_model()
@@ -310,7 +311,8 @@ async def lifespan(app: FastAPI):
             _team_to_idx = {name: i for i, name in enumerate(meta.get("team_classes", []))}
             _league_to_idx = {name: i for i, name in enumerate(meta.get("league_classes", []))}
             _known_team_names = set(_team_to_idx.keys())
-            logger.info("feature_metadata_loaded", teams=len(_team_to_idx), leagues=len(_league_to_idx))
+            _team_elos = {name: float(v) for name, v in meta.get("team_elos", {}).items()}
+            logger.info("feature_metadata_loaded", teams=len(_team_to_idx), leagues=len(_league_to_idx), elos=len(_team_elos))
         except Exception as e:
             logger.warning("feature_metadata_load_failed", error=str(e))
 
@@ -607,6 +609,7 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
         "away_a_gf_avg_last5", "away_a_ga_avg_last5", "away_a_form_last5",
         "home_days_rest", "away_days_rest", "league_avg_total_goals",
         "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins", "season",
+        "home_elo", "away_elo", "elo_diff",
     ]}
     if db is None:
         return f
@@ -628,10 +631,17 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
         match_date = r.get("scheduled_at")
         home_tid, away_tid = r.get("home_team_id"), r.get("away_team_id")
 
-        f["home_team_encoded"] = float(_team_to_idx.get(_resolve_team_name(home_team, _known_team_names), 0))
-        f["away_team_encoded"] = float(_team_to_idx.get(_resolve_team_name(away_team, _known_team_names), 0))
+        h_name = _resolve_team_name(home_team, _known_team_names)
+        a_name = _resolve_team_name(away_team, _known_team_names)
+        f["home_team_encoded"] = float(_team_to_idx.get(h_name, 0))
+        f["away_team_encoded"] = float(_team_to_idx.get(a_name, 0))
         f["league_encoded"] = float(_league_to_idx.get(league, 0))
         f["season"] = float(season)
+        elo_h = _team_elos.get(h_name, 1500)
+        elo_a = _team_elos.get(a_name, 1500)
+        f["home_elo"] = elo_h + 100  # home advantage bonus
+        f["away_elo"] = elo_a
+        f["elo_diff"] = f["home_elo"] - f["away_elo"]
 
         if not (match_date and home_tid and away_tid):
             return f
@@ -643,8 +653,8 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
             f[f"home_gf_avg_last{w}"] = h_gf
             f[f"home_ga_avg_last{w}"] = h_ga
             f[f"home_form_last{w}"] = h_pt
-            f[f"away_gf_avg_last{w}"] = a_ga
-            f[f"away_ga_avg_last{w}"] = a_gf
+            f[f"away_gf_avg_last{w}"] = a_gf
+            f[f"away_ga_avg_last{w}"] = a_ga
             f[f"away_form_last{w}"] = a_pt
 
         # home/away specific rolling
