@@ -485,5 +485,14 @@
     "Yokohama F. Marinos": 1637.3854656918263,
     "Yokohama FC": 1430.449435902143,
     "York Region Shooters": 1509.5049431892326
-  }
+  },
+  "accuracy": 0.5146,
+  "brier_score": 0.2097,
+  "trained_at": "2026-07-13T04:32:42.850135+00:00",
+  "train_date_range": [
+    "2022-02-18",
+    "2025-06-01"
+  ],
+  "n_matches": 8538,
+  "n_features": 37
 }

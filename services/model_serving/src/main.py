@@ -164,6 +164,7 @@ _cache: PredictionCache | None = None
 _calibrator: ProbabilityCalibrator | None = None
 _betting_engine: BettingEngine | None = None
 _explainer: PredictionExplainer | None = None
+_shap_explain: Any = None
 _predictor: ModelPredictor | None = None
 
 # Loaded from metadata at startup for feature encoding
@@ -259,6 +260,19 @@ def _calibrator_path() -> Path:
     return Path(__file__).resolve().parent.parent / "models" / "calibrator.json"
 
 
+def _metadata_path() -> Path:
+    """Resolve model metadata path (checks multiple locations)."""
+    candidates = [
+        Path.cwd() / "models" / "predictor_metadata.json",
+        Path(__file__).resolve().parent.parent / "models" / "predictor_metadata.json",
+        Path(__file__).resolve().parent / "predictor_metadata.json",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return candidates[0]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and tear down service dependencies."""
@@ -315,6 +329,17 @@ async def lifespan(app: FastAPI):
             logger.info("feature_metadata_loaded", teams=len(_team_to_idx), leagues=len(_league_to_idx), elos=len(_team_elos))
         except Exception as e:
             logger.warning("feature_metadata_load_failed", error=str(e))
+
+    # Initialize SHAP TreeExplainer from loaded model
+    global _shap_explain
+    if _predictor and _predictor._model is not None:
+        try:
+            import shap
+            _shap_explain = shap.TreeExplainer(_predictor._model)
+            logger.info("shap_explainer_initialized")
+        except Exception as e:
+            logger.warning("shap_explainer_init_failed", error=str(e))
+            _shap_explain = None
 
     if _require_loaded_model() and not _predictor.is_loaded:
         raise RuntimeError(
@@ -438,6 +463,7 @@ def _build_prediction_payload(
     probabilities: tuple[float, float, float],
     calibrated: bool,
     context: dict[str, Any] | None = None,
+    shap_explanation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the prediction response payload."""
     home_win_prob, draw_prob, away_win_prob = probabilities
@@ -465,7 +491,7 @@ def _build_prediction_payload(
         "brier_score_trailing_100": 0.18,
         "confidence": _classify_confidence(max_prob),
         "value_bets": [],
-        "shap_explanation": {
+        "shap_explanation": shap_explanation or {
             "positive_drivers": [],
             "negative_drivers": [],
         },
@@ -758,11 +784,79 @@ async def _generate_prediction(
 
     match_context = await _fetch_match_context(match_id, db)
 
+    shap_explanation = None
+    if _shap_explain is not None and _predictor and _predictor._model is not None:
+        try:
+            import pandas as pd
+            model_fn = _predictor._model.get_booster().feature_names
+            feat_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_fn}])
+            shap_vals = _shap_explain.shap_values(feat_df)
+            if isinstance(shap_vals, list):
+                shap_arr = shap_vals[0][0]
+            elif shap_vals.ndim == 3:
+                shap_arr = shap_vals[0, :, 0]
+            else:
+                shap_arr = shap_vals[0]
+
+            LABELS = {
+                "elo_diff": "Elo rating advantage",
+                "home_elo": "Home team Elo rating",
+                "away_elo": "Away team Elo rating",
+                "home_gf_avg_last3": "Home goals scored (last 3)",
+                "home_gf_avg_last5": "Home goals scored (last 5)",
+                "home_gf_avg_last10": "Home goals scored (last 10)",
+                "home_ga_avg_last3": "Home goals conceded (last 3)",
+                "home_ga_avg_last5": "Home goals conceded (last 5)",
+                "home_ga_avg_last10": "Home goals conceded (last 10)",
+                "home_form_last3": "Home form (last 3)",
+                "home_form_last5": "Home form (last 5)",
+                "home_form_last10": "Home form (last 10)",
+                "away_gf_avg_last3": "Away goals scored (last 3)",
+                "away_gf_avg_last5": "Away goals scored (last 5)",
+                "away_gf_avg_last10": "Away goals scored (last 10)",
+                "away_ga_avg_last3": "Away goals conceded (last 3)",
+                "away_ga_avg_last5": "Away goals conceded (last 5)",
+                "away_ga_avg_last10": "Away goals conceded (last 10)",
+                "away_form_last3": "Away form (last 3)",
+                "away_form_last5": "Away form (last 5)",
+                "away_form_last10": "Away form (last 10)",
+                "home_h_gf_avg_last5": "Home scoring at home",
+                "home_h_ga_avg_last5": "Home conceding at home",
+                "home_h_form_last5": "Home form at home",
+                "away_a_gf_avg_last5": "Away scoring away",
+                "away_a_ga_avg_last5": "Away conceding away",
+                "away_a_form_last5": "Away form away",
+                "home_days_rest": "Home team rest days",
+                "away_days_rest": "Away team rest days",
+                "league_avg_total_goals": "League average goals",
+                "h2h_home_gf_avg": "H2H home goals avg",
+                "h2h_away_gf_avg": "H2H away goals avg",
+                "h2h_home_wins": "H2H home win rate",
+                "home_team_encoded": "Home team strength",
+                "away_team_encoded": "Away team strength",
+                "league_encoded": "League context",
+                "season": "Season",
+            }
+            total_abs = sum(abs(v) for v in shap_arr)
+            drivers = sorted([
+                {"feature": model_fn[i],
+                 "impact": float(round(float(shap_arr[i]), 4)),
+                 "impact_pct": float(round(float(abs(shap_arr[i])) / float(total_abs) * 100, 1)) if float(total_abs) > 0 else 0.0,
+                 "label": LABELS.get(model_fn[i], model_fn[i].replace("_", " ").title())}
+                for i in range(len(model_fn)) if abs(shap_arr[i]) > 0.0001
+            ], key=lambda x: abs(x["impact"]), reverse=True)
+            pos = [d for d in drivers if d["impact"] > 0][:10]
+            neg = [d for d in drivers if d["impact"] < 0][:10]
+            shap_explanation = {"positive_drivers": pos, "negative_drivers": neg}
+        except Exception as e:
+            logger.info("shap_explain_skip", match_id=match_id, error=str(e))
+
     return _build_prediction_payload(
         match_id,
         (home_win_prob, draw_prob, away_win_prob),
         calibrated,
         context=match_context,
+        shap_explanation=shap_explanation,
     )
 
 
@@ -939,23 +1033,25 @@ async def get_report_pdf(match_id: str) -> dict[str, Any]:
 @app.get("/models")
 async def list_models() -> dict[str, Any]:
     """List available prediction models and their metadata."""
+    meta_path = _metadata_path()
+    meta = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+        except Exception:
+            pass
+
     return {
         "models": [
             {
                 "name": "xgboost_match_outcome",
-                "version": "v2.1",
+                "version": meta.get("model_version", "v3.0"),
                 "stage": "production",
-                "accuracy": 0.65,
-                "brier_score": 0.18,
-                "trained_at": "2026-03-01T00:00:00Z",
-            },
-            {
-                "name": "poisson_match_outcome",
-                "version": "v1.0",
-                "stage": "staging",
-                "accuracy": 0.58,
-                "brier_score": 0.22,
-                "trained_at": "2026-02-15T00:00:00Z",
+                "accuracy": meta.get("accuracy", 0.515),
+                "brier_score": meta.get("brier_score", 0.210),
+                "trained_at": meta.get("trained_at", "unknown"),
+                "n_matches": meta.get("n_matches", 8538),
+                "n_features": meta.get("n_features", 37),
             },
         ]
     }

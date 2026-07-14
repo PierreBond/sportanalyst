@@ -180,14 +180,6 @@ def main():
         team_elos[row["home_team"]] = row["home_elo"]
         team_elos[row["away_team"]] = row["away_elo"]
 
-    metadata = {
-        "feature_names": list(X.columns),
-        "team_classes": le_team.classes_.tolist(),
-        "league_classes": le_league.classes_.tolist(),
-        "target_names": ["home_win", "draw", "away_win"],
-        "team_elos": {name: team_elos.get(name, 1500) for name in le_team.classes_},
-    }
-
     # time-based split: train on older matches, test on recent
     split_date = df["scheduled_at"].quantile(0.8)
     train_idx = df["scheduled_at"] < split_date
@@ -206,7 +198,7 @@ def main():
     y_prob = model.predict_proba(X_test)
     acc = model.score(X_test, y_test)
     print(f"\nTest accuracy: {acc:.3f}")
-    print(classification_report(y_test, y_pred, target_names=metadata["target_names"]))
+    print(classification_report(y_test, y_pred, target_names=["home_win", "draw", "away_win"]))
     for i, label in enumerate(["home", "draw", "away"]):
         brier = brier_score_loss((y_test == i).astype(int), y_prob[:, i])
         print(f"  Brier ({label}): {brier:.4f}")
@@ -215,6 +207,23 @@ def main():
     imp = pd.DataFrame({"feature": FEATURES, "importance": model.feature_importances_}).sort_values("importance", ascending=False)
     print("\nTop 10 features:")
     print(imp.head(10).to_string(index=False))
+
+    train_dt = df["scheduled_at"].min()
+    test_dt = df["scheduled_at"].max()
+    brier_avg = (sum(brier_score_loss((y_test == i).astype(int), y_prob[:, i]) for i in range(3))) / 3
+    metadata = {
+        "feature_names": list(X.columns),
+        "team_classes": le_team.classes_.tolist(),
+        "league_classes": le_league.classes_.tolist(),
+        "target_names": ["home_win", "draw", "away_win"],
+        "team_elos": {name: team_elos.get(name, 1500) for name in le_team.classes_},
+        "accuracy": float(round(model.score(X_test, y_test), 4)),
+        "brier_score": float(round(brier_avg, 4)),
+        "trained_at": pd.Timestamp.now(tz="UTC").isoformat(),
+        "train_date_range": [str(train_dt.date()), str(test_dt.date())],
+        "n_matches": len(df),
+        "n_features": len(X.columns),
+    }
 
     model_path = MODEL_DIR / "predictor.joblib"
     joblib.dump(model, model_path)
