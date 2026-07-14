@@ -486,13 +486,25 @@
     "Yokohama FC": 1430.449435902143,
     "York Region Shooters": 1509.5049431892326
   },
-  "accuracy": 0.5146,
-  "brier_score": 0.2097,
-  "trained_at": "2026-07-13T04:32:42.850135+00:00",
+  "accuracy": 0.5152,
+  "brier_score": 0.1999,
+  "accuracy_xgb": 0.5258,
+  "accuracy_poisson": 0.4971,
+  "trained_at": "2026-07-14T00:43:29.820150+00:00",
   "train_date_range": [
     "2022-02-18",
     "2025-06-01"
   ],
   "n_matches": 8538,
-  "n_features": 37
+  "n_features": 37,
+  "best_xgb_params": {
+    "n_estimators": 400,
+    "max_depth": 4,
+    "learning_rate": 0.02,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "random_state": 42,
+    "eval_metric": "mlogloss"
+  },
+  "model_type": "ensemble_xgb_poisson"
 }

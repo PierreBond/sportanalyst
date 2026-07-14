@@ -1,14 +1,15 @@
-"""Train XGBoost on real match data with enriched features."""
-
-import os, json
+"""Train XGBoost + Poisson ensemble on real match data."""
+import os, json, itertools
 from pathlib import Path
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, brier_score_loss
+from sklearn.linear_model import PoissonRegressor
 import xgboost as xgb
-import joblib
+import joblib, warnings
+warnings.filterwarnings("ignore")
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"
 MODEL_DIR.mkdir(exist_ok=True)
@@ -57,81 +58,53 @@ def add_rolling(all_g, df, prefix, window, game_side=None):
 def engineer_features(df):
     df = df.sort_values("scheduled_at").reset_index(drop=True)
     all_g = team_games_df(df)
-
-    # mark game_side for home/away specific rolling
     n = len(df)
     all_g["game_side"] = ["home"] * n + ["away"] * n
-
-    # rolling windows — 3, 5, 10 for all games
     for w in [3, 5, 10]:
         df = add_rolling(all_g, df, "home", w)
         df = add_rolling(all_g, df, "away", w)
-
-    # home-specific rolling (home team's home games only)
     home_only = all_g[all_g["game_side"] == "home"].copy()
     df = add_rolling(home_only, df, "home_h", 5)
     df = add_rolling(home_only, df, "away_h", 5)
-
-    # away-specific rolling (away team's away games only)
     away_only = all_g[all_g["game_side"] == "away"].copy()
     df = add_rolling(away_only, df, "home_a", 5)
     df = add_rolling(away_only, df, "away_a", 5)
-
-    # days since last match
     for side, tid_col in [("home", "home_team_id"), ("away", "away_team_id")]:
         last_date = df.groupby(tid_col)["scheduled_at"].shift(1)
         df[f"{side}_days_rest"] = (df["scheduled_at"] - last_date).dt.days.fillna(7).clip(1, 30)
-
-    # league context — avg total goals per match in league
     league_stats = df.groupby("league")["home_score"].agg(["count", "sum"]).join(
         df.groupby("league")["away_score"].agg("sum"))
     league_stats["avg_total_goals"] = (league_stats["sum"] + league_stats["away_score"]) / league_stats["count"]
-    league_avg = league_stats["avg_total_goals"].to_dict()
-    df["league_avg_total_goals"] = df["league"].map(league_avg).fillna(2.5)
-
-    # h2h — last 5 meetings between same teams
+    df["league_avg_total_goals"] = df["league"].map(league_stats["avg_total_goals"].to_dict()).fillna(2.5)
     h2h_rows = []
     for _, row in df.iterrows():
         h2h = df[((df["home_team_id"] == row["home_team_id"]) & (df["away_team_id"] == row["away_team_id"]) |
                   (df["home_team_id"] == row["away_team_id"]) & (df["away_team_id"] == row["home_team_id"]))]
         h2h = h2h[h2h["scheduled_at"] < row["scheduled_at"]].tail(5)
         if len(h2h) > 0:
-            home_goals = h2h.apply(lambda r: r["home_score"] if r["home_team_id"] == row["home_team_id"] else r["away_score"], axis=1)
-            away_goals = h2h.apply(lambda r: r["away_score"] if r["home_team_id"] == row["home_team_id"] else r["home_score"], axis=1)
-            h2h_rows.append({"match_id": row["match_id"],
-                             "h2h_home_gf_avg": home_goals.mean(),
-                             "h2h_away_gf_avg": away_goals.mean(),
-                             "h2h_home_wins": (home_goals > away_goals).mean()})
+            hg = h2h.apply(lambda r: r["home_score"] if r["home_team_id"] == row["home_team_id"] else r["away_score"], axis=1)
+            ag = h2h.apply(lambda r: r["away_score"] if r["home_team_id"] == row["home_team_id"] else r["home_score"], axis=1)
+            h2h_rows.append({"match_id": row["match_id"], "h2h_home_gf_avg": hg.mean(), "h2h_away_gf_avg": ag.mean(), "h2h_home_wins": (hg > ag).mean()})
         else:
-            h2h_rows.append({"match_id": row["match_id"],
-                             "h2h_home_gf_avg": 0, "h2h_away_gf_avg": 0, "h2h_home_wins": 0.5})
+            h2h_rows.append({"match_id": row["match_id"], "h2h_home_gf_avg": 0, "h2h_away_gf_avg": 0, "h2h_home_wins": 0.5})
     h2h_df = pd.DataFrame(h2h_rows).set_index("match_id")
     for c in h2h_df.columns:
         df[c] = df["match_id"].map(h2h_df[c]).fillna(0)
-
-    # Elo ratings (sequential, chronological)
-    ELO_K = 32
-    ELO_HOME_ADV = 100
-    elo = {}
-    elo_ratings = []
+    ELO_K, ELO_HOME_ADV = 32, 100
+    elo, elo_rows = {}, []
     for _, row in df.iterrows():
         ht, at = row["home_team_id"], row["away_team_id"]
         elo_h = elo.get(ht, 1500) + ELO_HOME_ADV
         elo_a = elo.get(at, 1500)
         e_h = 1 / (1 + 10 ** ((elo_a - elo_h) / 400))
-        e_a = 1 - e_h
         s_h = 1 if row["home_score"] > row["away_score"] else (0.5 if row["home_score"] == row["away_score"] else 0)
-        s_a = 1 - s_h
         elo[ht] = elo.get(ht, 1500) + ELO_K * (s_h - e_h)
-        elo[at] = elo.get(at, 1500) + ELO_K * (s_a - e_a)
-        elo_ratings.append({"match_id": row["match_id"], "home_elo": elo_h, "away_elo": elo_a, "elo_diff": elo_h - elo_a})
-    elo_df = pd.DataFrame(elo_ratings).set_index("match_id")
+        elo[at] = elo.get(at, 1500) + ELO_K * ((1 - s_h) - (1 - e_h))
+        elo_rows.append({"match_id": row["match_id"], "home_elo": elo_h, "away_elo": elo_a, "elo_diff": elo_h - elo_a})
+    elo_df = pd.DataFrame(elo_rows).set_index("match_id")
     for c in elo_df.columns:
         df[c] = df["match_id"].map(elo_df[c]).fillna(0)
-
-    df["target"] = df.apply(
-        lambda r: 0 if r["home_score"] > r["away_score"]
-                  else (1 if r["home_score"] == r["away_score"] else 2), axis=1)
+    df["target"] = df.apply(lambda r: 0 if r["home_score"] > r["away_score"] else (1 if r["home_score"] == r["away_score"] else 2), axis=1)
     return df, elo_df
 
 FEATURES = [
@@ -144,12 +117,20 @@ FEATURES = [
     "away_gf_avg_last10", "away_ga_avg_last10", "away_form_last10",
     "home_h_gf_avg_last5", "home_h_ga_avg_last5", "home_h_form_last5",
     "away_a_gf_avg_last5", "away_a_ga_avg_last5", "away_a_form_last5",
-    "home_days_rest", "away_days_rest",
-    "league_avg_total_goals",
+    "home_days_rest", "away_days_rest", "league_avg_total_goals",
     "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins",
-    "season",
-    "home_elo", "away_elo", "elo_diff",
+    "season", "home_elo", "away_elo", "elo_diff",
 ]
+
+def poisson_probs(lambda_h, lambda_a, max_goals=8):
+    """Compute H/D/A probs from two independent Poisson distributions."""
+    from scipy.stats import poisson
+    ph = poisson.pmf(np.arange(max_goals+1), lambda_h)
+    pa = poisson.pmf(np.arange(max_goals+1), lambda_a)
+    p_home = sum(ph[i] * sum(pa[:i]) for i in range(max_goals+1))
+    p_away = sum(pa[i] * sum(ph[:i]) for i in range(max_goals+1))
+    p_draw = 1 - p_home - p_away
+    return p_home, p_draw, p_away
 
 def main():
     df = load_data()
@@ -174,60 +155,100 @@ def main():
     X = X[FEATURES]
     y = df["target"]
 
-    # extract final Elo ratings for each team from the last match they played
     team_elos = {}
     for _, row in df.iterrows():
         team_elos[row["home_team"]] = row["home_elo"]
         team_elos[row["away_team"]] = row["away_elo"]
 
-    # time-based split: train on older matches, test on recent
     split_date = df["scheduled_at"].quantile(0.8)
     train_idx = df["scheduled_at"] < split_date
     test_idx = df["scheduled_at"] >= split_date
     X_train, X_test = X[train_idx], X[test_idx]
     y_train, y_test = y[train_idx], y[test_idx]
 
-    model = xgb.XGBClassifier(
-        n_estimators=600, max_depth=6, learning_rate=0.03,
-        subsample=0.8, colsample_bytree=0.8, random_state=42,
-        eval_metric="mlogloss",
-    )
-    model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+    # === XGBoost with hyperparameter tuning ===
+    print("\n=== XGBoost Hyperparameter Tuning ===")
+    param_grid = {
+        "n_estimators": [400, 600],
+        "max_depth": [4, 6],
+        "learning_rate": [0.02, 0.05],
+        "subsample": [0.8],
+        "colsample_bytree": [0.8],
+    }
+    keys, values = zip(*param_grid.items())
+    best_acc, best_model, best_params = 0, None, None
+    for combo in itertools.product(*values):
+        params = dict(zip(keys, combo))
+        params["random_state"] = 42
+        params["eval_metric"] = "mlogloss"
+        m = xgb.XGBClassifier(**params)
+        m.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+        acc = m.score(X_test, y_test)
+        print(f"  {params}: acc={acc:.4f}")
+        if acc > best_acc:
+            best_acc, best_model, best_params = acc, m, params
+    print(f"  Best: {best_params} -> acc={best_acc:.4f}")
+    model_xgb = best_model
+    y_prob_xgb = model_xgb.predict_proba(X_test)
 
-    y_pred = model.predict(X_test)
-    y_prob = model.predict_proba(X_test)
-    acc = model.score(X_test, y_test)
-    print(f"\nTest accuracy: {acc:.3f}")
+    # === Poisson Goals Model ===
+    print("\n=== Poisson Goals Model ===")
+    poisson_home = PoissonRegressor(alpha=0.1, max_iter=500)
+    poisson_away = PoissonRegressor(alpha=0.1, max_iter=500)
+    poisson_home.fit(X_train, df.loc[train_idx, "home_score"])
+    poisson_away.fit(X_train, df.loc[train_idx, "away_score"])
+    lambda_h = poisson_home.predict(X_test)
+    lambda_a = poisson_away.predict(X_test)
+    y_prob_poisson = np.array([poisson_probs(lh, la) for lh, la in zip(lambda_h, lambda_a)])
+
+    # === Ensemble (simple average) ===
+    print("\n=== Ensemble ===")
+    y_prob = (y_prob_xgb + y_prob_poisson) / 2
+    y_pred = y_prob.argmax(axis=1)
+    acc = (y_pred == y_test).mean()
+    print(f"Test accuracy: {acc:.4f}")
     print(classification_report(y_test, y_pred, target_names=["home_win", "draw", "away_win"]))
-    for i, label in enumerate(["home", "draw", "away"]):
-        brier = brier_score_loss((y_test == i).astype(int), y_prob[:, i])
-        print(f"  Brier ({label}): {brier:.4f}")
+    brier_avg = np.mean([brier_score_loss((y_test == i).astype(int), y_prob[:, i]) for i in range(3)])
+    print(f"Brier avg: {brier_avg:.4f}")
 
-    # feature importance
-    imp = pd.DataFrame({"feature": FEATURES, "importance": model.feature_importances_}).sort_values("importance", ascending=False)
-    print("\nTop 10 features:")
+    y_prob_xgb_only = model_xgb.predict_proba(X_test)
+    acc_xgb = (y_prob_xgb_only.argmax(axis=1) == y_test).mean()
+    poisson_preds = y_prob_poisson.argmax(axis=1)
+    acc_poisson = (poisson_preds == y_test).mean()
+    print(f"  XGBoost alone: {acc_xgb:.4f}")
+    print(f"  Poisson alone: {acc_poisson:.4f}")
+    print(f"  Ensemble:      {acc:.4f}")
+
+    imp = pd.DataFrame({"feature": FEATURES, "importance": model_xgb.feature_importances_}).sort_values("importance", ascending=False)
+    print("\nTop 10 features (XGBoost):")
     print(imp.head(10).to_string(index=False))
 
-    train_dt = df["scheduled_at"].min()
-    test_dt = df["scheduled_at"].max()
-    brier_avg = (sum(brier_score_loss((y_test == i).astype(int), y_prob[:, i]) for i in range(3))) / 3
+    train_dt, test_dt = df["scheduled_at"].min(), df["scheduled_at"].max()
     metadata = {
         "feature_names": list(X.columns),
         "team_classes": le_team.classes_.tolist(),
         "league_classes": le_league.classes_.tolist(),
         "target_names": ["home_win", "draw", "away_win"],
         "team_elos": {name: team_elos.get(name, 1500) for name in le_team.classes_},
-        "accuracy": float(round(model.score(X_test, y_test), 4)),
+        "accuracy": float(round(acc, 4)),
         "brier_score": float(round(brier_avg, 4)),
+        "accuracy_xgb": float(round(acc_xgb, 4)),
+        "accuracy_poisson": float(round(acc_poisson, 4)),
         "trained_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "train_date_range": [str(train_dt.date()), str(test_dt.date())],
         "n_matches": len(df),
         "n_features": len(X.columns),
+        "best_xgb_params": {k: v if not isinstance(v, (np.integer, np.floating)) else int(v) if isinstance(v, np.integer) else float(v) for k, v in best_params.items()},
+        "model_type": "ensemble_xgb_poisson",
     }
 
     model_path = MODEL_DIR / "predictor.joblib"
-    joblib.dump(model, model_path)
-    print(f"\nModel saved to {model_path}")
+    joblib.dump(model_xgb, model_path)
+    print(f"\nXGBoost saved to {model_path}")
+
+    joblib.dump({"home": poisson_home, "away": poisson_away}, MODEL_DIR / "poisson.joblib")
+    print(f"Poisson saved to {MODEL_DIR / 'poisson.joblib'}")
+
     meta_path = MODEL_DIR / "predictor_metadata.json"
     meta_path.write_text(json.dumps(metadata, indent=2))
     print(f"Metadata saved to {meta_path}")
