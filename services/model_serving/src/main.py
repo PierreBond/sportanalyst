@@ -923,7 +923,6 @@ async def get_value_bets(
 ) -> dict[str, Any]:
     """Retrieve value bets for a given date, filtered by minimum edge."""
 
-    # Try cache first, but don't fail if it's unavailable
     if date and _cache:
         try:
             cached_bets = await _cache.get_value_bets(date)
@@ -932,51 +931,73 @@ async def get_value_bets(
                 return {"date": date, "value_bets": cached_bets, "cached": True}
         except Exception as e:
             logger.warning("value_bets_cache_error", date=date, error=str(e))
-            # Continue without cache on error
 
-    match_ids: list[str] = []
+    rows: list[dict[str, Any]] = []
     if db is not None:
         try:
-            upcoming = await db.execute(
-                text(
-                    """
-                    SELECT m.match_id::text AS match_id
-                    FROM matches m
-                    WHERE m.scheduled_at >= NOW() - INTERVAL '1 day'
-                    ORDER BY m.scheduled_at ASC
-                    LIMIT 8
-                    """
-                )
-            )
-            match_ids = [row["match_id"] for row in upcoming.mappings().all()]
+            base_sql = """
+                SELECT DISTINCT ON (os.match_id)
+                    m.match_id::text AS match_id,
+                    ht.name AS home_team,
+                    at.name AS away_team,
+                    os.home_odds, os.draw_odds, os.away_odds,
+                    os.sportsbook, os.captured_at,
+                    p.home_win_prob, p.draw_prob, p.away_win_prob
+                FROM odds_snapshots os
+                JOIN matches m ON os.match_id = m.match_id
+                JOIN teams ht ON m.home_team_id = ht.team_id
+                JOIN teams at ON m.away_team_id = at.team_id
+                LEFT JOIN predictions p ON p.match_id = m.match_id
+            """
+            if date:
+                q = text(base_sql + " WHERE DATE(m.scheduled_at) = DATE(:dt)")
+                result = await db.execute(q, {"dt": date})
+            else:
+                q = text(base_sql + " WHERE m.scheduled_at >= NOW() - INTERVAL '1 day'")
+                result = await db.execute(q)
+            rows = [dict(r._mapping) for r in result.all()]
         except Exception as e:
-            logger.warning("value_bets_match_lookup_failed", error=str(e))
+            logger.warning("value_bets_query_failed", error=str(e))
 
-    if not match_ids:
-        return {
-            "date": date or datetime.now(timezone.utc).date().isoformat(),
-            "value_bets": [],
-            "cached": False,
-        }
-
+    now_dt = datetime.now(timezone.utc)
     value_bets = []
-    for idx, bet_match_id in enumerate(match_ids):
-        edge = round(max(min_edge + 0.015 + (idx * 0.004), min_edge), 4)
-        model_prob = round(min(0.52 + (idx * 0.01), 0.72), 4)
-        best_odds = round(1.9 + (idx * 0.08), 2)
-        implied_prob = round(1 / best_odds, 4)
-        value_bets.append(
-            {
-                "match_id": bet_match_id,
-                "selection": "home_win",
+    for row in rows:
+        best_odds = max(row["home_odds"], row["draw_odds"], row["away_odds"])
+        edge = 0.0
+        selection = "home_win"
+        h_prob = float(row["home_win_prob"]) if row.get("home_win_prob") else 0.0
+        d_prob = float(row["draw_prob"]) if row.get("draw_prob") else 0.0
+        a_prob = float(row["away_win_prob"]) if row.get("away_win_prob") else 0.0
+        if row["home_odds"] > 0 and row["home_odds"] == best_odds:
+            implied_prob = round(1 / row["home_odds"], 4)
+            model_prob = h_prob or implied_prob
+            edge = round(model_prob - implied_prob, 4)
+            selection = "home_win"
+        elif row["away_odds"] > 0 and row["away_odds"] == best_odds:
+            implied_prob = round(1 / row["away_odds"], 4)
+            model_prob = a_prob or implied_prob
+            edge = round(model_prob - implied_prob, 4)
+            selection = "away_win"
+        else:
+            implied_prob = round(1 / row["draw_odds"], 4) if row["draw_odds"] else 0.0
+            model_prob = d_prob or implied_prob
+            edge = round(model_prob - implied_prob, 4)
+            selection = "draw"
+
+        if edge >= min_edge:
+            value_bets.append({
+                "match_id": row["match_id"],
+                "home_team": row["home_team"],
+                "away_team": row["away_team"],
+                "selection": selection,
                 "model_prob": model_prob,
                 "best_odds": best_odds,
                 "implied_prob": implied_prob,
                 "edge": edge,
                 "kelly_stake_pct": round(edge * 25, 2),
-                "sportsbook": "DraftKings" if idx % 2 == 0 else "FanDuel",
-            }
-        )
+                "sportsbook": row["sportsbook"],
+                "odds_captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
+            })
 
     # Try to cache, but don't fail if it's unavailable
     if date and _cache:
