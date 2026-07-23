@@ -1,5 +1,5 @@
 """Batch predictions using trained XGBoost+Poisson model, writes to predictions table."""
-import json, os, sys
+import json, os, sys, unicodedata
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -9,6 +9,37 @@ from sqlalchemy import create_engine, text
 
 DB_URL = os.environ.get("DATABASE_URL_SYNC")
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
+
+_TEAM_PREFIXES = ["SE ", "CR ", "CA ", "SC ", "EC ", "GR ", "AE ", "AD "]
+_TEAM_SUFFIXES = [" FC", " EC", " FR", " FBC", " FBPA", " AF"]
+_TEAM_REMOVALS = [" Paulista"]
+_TEAM_SPECIAL = {"ca mineiro": "Atletico-MG", "ca paranaense": "Atletico Paranaense"}
+
+def _remove_accents(text: str) -> str:
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+
+def _resolve_team_name(db_name: str, known: set[str]) -> str:
+    if not db_name or db_name in known:
+        return db_name
+    normalized = _remove_accents(db_name).lower().strip()
+    special = _TEAM_SPECIAL.get(normalized)
+    if special and special in known:
+        return special
+    for p in _TEAM_PREFIXES:
+        if db_name.startswith(p) and db_name[len(p):] in known:
+            return db_name[len(p):]
+    for s in _TEAM_SUFFIXES:
+        if db_name.endswith(s) and db_name[:-len(s)] in known:
+            return db_name[:-len(s)]
+    for r in _TEAM_REMOVALS:
+        candidate = db_name.replace(r, "")
+        if candidate in known:
+            return candidate
+    db_clean = normalized
+    for k in known:
+        if _remove_accents(k).lower().strip() == db_clean:
+            return k
+    return db_name
 
 def build_features(match_row, team_idx, league_idx, elos, db):
     mid, home, away, league, season, scheduled_at, home_tid, away_tid = match_row
@@ -26,10 +57,9 @@ def build_features(match_row, team_idx, league_idx, elos, db):
         "h2h_home_gf_avg","h2h_away_gf_avg","h2h_home_wins","season",
         "home_elo","away_elo","elo_diff",
     ]}
-    h_name = home if home in team_idx else (home.replace(" FC","").replace(" EC","").replace(" SC","").strip() if home else "")
-    h_name = h_name if h_name in team_idx else home
-    a_name = away if away in team_idx else (away.replace(" FC","").replace(" EC","").replace(" SC","").strip() if away else "")
-    a_name = a_name if a_name in team_idx else away
+    known = set(team_idx.keys())
+    h_name = _resolve_team_name(home, known)
+    a_name = _resolve_team_name(away, known)
     f["home_team_encoded"] = float(team_idx.get(h_name, 0))
     f["away_team_encoded"] = float(team_idx.get(a_name, 0))
     f["league_encoded"] = float(league_idx.get(league, 0))

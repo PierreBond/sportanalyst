@@ -12,6 +12,7 @@ from sports_common.league_config import get_league_config
 from sports_common.db import DatabaseClient
 
 from ..adapters.api_sports import APISportsAdapter
+from ..adapters.football_data_org import FootballDataOrgAdapter
 from ..adapters.sportsdataio import SportsDataIOAdapter
 from ..adapters.thesportsdb import TheSportsDBAdapter
 
@@ -78,6 +79,11 @@ class IngestingLeagueProcessor:
             elif provider == "thesportsdb":
                 api_key = self._settings.thesportsdb_key or "free"
                 self._adapters[provider] = TheSportsDBAdapter(api_key)
+            elif provider == "football_data_org":
+                api_key = self._settings.football_data_org_key
+                if not api_key:
+                    raise ValueError("FOOTBALL_DATA_ORG_KEY not configured")
+                self._adapters[provider] = FootballDataOrgAdapter(api_key)
             else:
                 raise ValueError(f"Unknown provider: {provider}")
 
@@ -173,9 +179,15 @@ class IngestingLeagueProcessor:
                 "errors": [str(e)],
             }
 
+    def _get_preferred_provider(self, league_id: str) -> str:
+        """Pick provider for a league based on available mappings."""
+        if self.get_provider_league_id(league_id, "football_data_org"):
+            return "football_data_org"
+        return "api_sports"
+
     async def _process_single_league(self, league_id: str) -> dict:
         """Process a single league with actual data fetching."""
-        provider = "api_sports"
+        provider = self._get_preferred_provider(league_id)
         provider_league_id = self.get_provider_league_id(league_id, provider)
 
         if not provider_league_id:
@@ -257,6 +269,9 @@ class IngestingLeagueProcessor:
             return await self._fetch_sportsdataio(adapter, provider_league_id, offset, limit)
         elif provider == "thesportsdb":
             return await self._fetch_thesportsdb(adapter, provider_league_id, limit)
+        elif provider == "football_data_org":
+            fd_season = str(datetime.now(timezone.utc).year)
+            return await self._fetch_footballdata(adapter, provider_league_id, fd_season)
         else:
             return []
 
@@ -310,6 +325,49 @@ class IngestingLeagueProcessor:
                 "scheduled_at": f.get("fixture", {}).get("date", ""),
                 "status": f.get("fixture", {}).get("status", {}).get("short", ""),
                 "venue": f.get("fixture", {}).get("venue", {}).get("name", ""),
+            }
+            for f in fixtures
+        ]
+
+    async def _fetch_footballdata(
+        self,
+        adapter: FootballDataOrgAdapter,
+        competition_code: str,
+        season: str,
+    ) -> list[dict]:
+        """Fetch from football-data.org for a competition + season."""
+        try:
+            endpoint = f"competitions/{competition_code}/matches?season={season}"
+            response = await adapter.fetch_with_retry("GET", endpoint)
+            data = response.json()
+            return self._parse_footballdata_fixtures(data.get("matches", []))
+        except Exception as e:
+            logger.error("footballdata_fetch_failed", error=str(e))
+            return []
+
+    def _parse_footballdata_fixtures(self, fixtures: list[dict]) -> list[dict]:
+        """Parse football-data.org match list into standard format."""
+        STATUS_MAP = {
+            "FINISHED": "FT", "SCHEDULED": "scheduled", "TIMED": "scheduled",
+            "POSTPONED": "postponed", "CANCELLED": "cancelled", "SUSPENDED": "suspended",
+        }
+        return [
+            {
+                "external_id": f"footballdata_{f.get('id', '')}",
+                "season": str(f.get("season", {}).get("id", "")),
+                "league": f.get("competition", {}).get("code", ""),
+                "home_team": f.get("homeTeam", {}).get("name", ""),
+                "away_team": f.get("awayTeam", {}).get("name", ""),
+                "home_team_external_id": f"footballdata_{f.get('homeTeam', {}).get('id', '')}",
+                "away_team_external_id": f"footballdata_{f.get('awayTeam', {}).get('id', '')}",
+                "home_score": f.get("score", {}).get("fullTime", {}).get("home"),
+                "away_score": f.get("score", {}).get("fullTime", {}).get("away"),
+                "home_halftime_score": f.get("score", {}).get("halfTime", {}).get("home"),
+                "away_halftime_score": f.get("score", {}).get("halfTime", {}).get("away"),
+                "scheduled_at": f.get("utcDate", ""),
+                "status": STATUS_MAP.get(f.get("status", ""), "scheduled"),
+                "venue": (f.get("venue") or {}).get("name", ""),
+                "round": str(f.get("matchday", "")),
             }
             for f in fixtures
         ]
