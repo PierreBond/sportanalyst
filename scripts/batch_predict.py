@@ -56,6 +56,8 @@ def build_features(match_row, team_idx, league_idx, elos, db):
         "home_days_rest","away_days_rest","league_avg_total_goals",
         "h2h_home_gf_avg","h2h_away_gf_avg","h2h_home_wins","season",
         "home_elo","away_elo","elo_diff",
+        "home_odds","draw_odds","away_odds",
+        "home_implied_prob","draw_implied_prob","away_implied_prob",
     ]}
     known = set(team_idx.keys())
     h_name = _resolve_team_name(home, known)
@@ -151,12 +153,30 @@ def build_features(match_row, team_idx, league_idx, elos, db):
         else:
             f["h2h_home_wins"] = 0.5
 
+        # ponytail: odds features from the-odds-api
+        odd = conn2.execute(text("""
+            SELECT home_odds, draw_odds, away_odds FROM odds_snapshots
+            WHERE match_id = :mid ORDER BY captured_at DESC LIMIT 1
+        """), {"mid": mid}).fetchone()
+        if odd and odd[0]:
+            f["home_odds"] = float(odd[0])
+            f["draw_odds"] = float(odd[1])
+            f["away_odds"] = float(odd[2])
+            inv_h = 1.0 / float(odd[0])
+            inv_d = 1.0 / float(odd[1])
+            inv_a = 1.0 / float(odd[2])
+            total = inv_h + inv_d + inv_a
+            f["home_implied_prob"] = inv_h / total
+            f["draw_implied_prob"] = inv_d / total
+            f["away_implied_prob"] = inv_a / total
+
     return f
 
 def main():
     db = create_engine(DB_URL)
     meta = json.load(open(MODEL_DIR / "predictor_metadata.json"))
     model = joblib.load(MODEL_DIR / "predictor.joblib")
+    MODEL_VERSION = meta.get("model_version", "unknown")
     fnames = meta["feature_names"]
     team_idx = {n: i for i, n in enumerate(meta["team_classes"])}
     league_idx = {n: i for i, n in enumerate(meta["league_classes"])}
@@ -190,9 +210,9 @@ def main():
             conn.execute(text("""
                 INSERT INTO predictions (prediction_id, match_id, model_name, model_version,
                     predicted_at, home_win_prob, draw_prob, away_win_prob, is_live, created_at)
-                VALUES (:pid,:mid,'ensemble_xgb_poisson','2.0',:now,:h,:d,:a,false,:now)
+                VALUES (:pid,:mid,'ensemble_xgb_poisson',:mv,:now,:h,:d,:a,false,:now)
                 ON CONFLICT DO NOTHING
-            """), {"pid": uuid4(), "mid": mid, "now": now_dt,
+            """), {"pid": uuid4(), "mv": MODEL_VERSION, "mid": mid, "now": now_dt,
                    "h": round(float(probs[0]), 4), "d": round(float(probs[1]), 4),
                    "a": round(float(probs[2]), 4)})
             ins += 1

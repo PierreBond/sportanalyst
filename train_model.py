@@ -120,6 +120,8 @@ FEATURES = [
     "home_days_rest", "away_days_rest", "league_avg_total_goals",
     "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins",
     "season", "home_elo", "away_elo", "elo_diff",
+    "home_odds", "draw_odds", "away_odds",
+    "home_implied_prob", "draw_implied_prob", "away_implied_prob",
 ]
 
 def poisson_probs(lambda_h, lambda_a, max_goals=8):
@@ -136,6 +138,36 @@ def main():
     df = load_data()
     print(f"Loaded {len(df)} matches")
     df, elo_df = engineer_features(df)
+
+    # ponytail: odds features from the-odds-api, mostly 0 for historical data
+    engine2 = create_engine(os.environ["DATABASE_URL_SYNC"])
+    odds_df = pd.read_sql("""
+        SELECT DISTINCT ON (match_id) match_id::text, home_odds, draw_odds, away_odds
+        FROM odds_snapshots ORDER BY match_id, captured_at DESC
+    """, engine2)
+    engine2.dispose()
+    if len(odds_df) > 0:
+        odds_df["match_id"] = odds_df["match_id"].astype(str)
+        df["match_id"] = df["match_id"].astype(str)
+        df = df.merge(odds_df, on="match_id", how="left")
+        for c in ["home_odds", "draw_odds", "away_odds"]:
+            df[c] = df[c].fillna(0.0).astype(float)
+        inv = pd.DataFrame({
+            "h": np.where(df["home_odds"] > 0, 1.0 / df["home_odds"], 0),
+            "d": np.where(df["draw_odds"] > 0, 1.0 / df["draw_odds"], 0),
+            "a": np.where(df["away_odds"] > 0, 1.0 / df["away_odds"], 0),
+        })
+        denom = inv.sum(axis=1)
+        df["home_implied_prob"] = np.where(denom > 0, inv["h"] / denom, 0.0)
+        df["draw_implied_prob"] = np.where(denom > 0, inv["d"] / denom, 0.0)
+        df["away_implied_prob"] = np.where(denom > 0, inv["a"] / denom, 0.0)
+    else:
+        for c in ["home_odds", "draw_odds", "away_odds",
+                   "home_implied_prob", "draw_implied_prob", "away_implied_prob"]:
+            df[c] = 0.0
+    n_with_odds = (df["home_odds"] > 0).sum()
+    print(f"Matches with odds: {n_with_odds}/{len(df)}")
+
     df = df.dropna(subset=["target"])
     print(f"After features: {len(df)} matches")
     print(f"Target distribution: {df['target'].value_counts().to_dict()}")
@@ -160,11 +192,21 @@ def main():
         team_elos[row["home_team"]] = row["home_elo"]
         team_elos[row["away_team"]] = row["away_elo"]
 
-    split_date = df["scheduled_at"].quantile(0.8)
-    train_idx = df["scheduled_at"] < split_date
-    test_idx = df["scheduled_at"] >= split_date
-    X_train, X_test = X[train_idx], X[test_idx]
-    y_train, y_test = y[train_idx], y[test_idx]
+    # Season-based split: train on all but most recent season, test on most recent
+    seasons = sorted(df["season"].astype(str).unique())
+    test_season = seasons[-1]
+    train_seasons = [s for s in seasons if s != test_season]
+    train_mask = df["season"].astype(str).isin(train_seasons)
+    test_mask = df["season"].astype(str) == test_season
+    # Fallback: if only one season exists, use 80/20 date split
+    if len(seasons) < 2:
+        split_date = df["scheduled_at"].quantile(0.8)
+        train_mask = df["scheduled_at"] < split_date
+        test_mask = df["scheduled_at"] >= split_date
+    X_train, X_test = X[train_mask], X[test_mask]
+    y_train, y_test = y[train_mask], y[test_mask]
+    print(f"Train: {X_train.shape[0]} matches ({', '.join(train_seasons)})")
+    print(f"Test:  {X_test.shape[0]} matches ({test_season})")
 
     # === XGBoost with hyperparameter tuning ===
     print("\n=== XGBoost Hyperparameter Tuning ===")
@@ -195,8 +237,8 @@ def main():
     print("\n=== Poisson Goals Model ===")
     poisson_home = PoissonRegressor(alpha=0.1, max_iter=500)
     poisson_away = PoissonRegressor(alpha=0.1, max_iter=500)
-    poisson_home.fit(X_train, df.loc[train_idx, "home_score"])
-    poisson_away.fit(X_train, df.loc[train_idx, "away_score"])
+    poisson_home.fit(X_train, df.loc[train_mask, "home_score"])
+    poisson_away.fit(X_train, df.loc[train_mask, "away_score"])
     lambda_h = poisson_home.predict(X_test)
     lambda_a = poisson_away.predict(X_test)
     y_prob_poisson = np.array([poisson_probs(lh, la) for lh, la in zip(lambda_h, lambda_a)])
@@ -236,10 +278,13 @@ def main():
         "accuracy_poisson": float(round(acc_poisson, 4)),
         "trained_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "train_date_range": [str(train_dt.date()), str(test_dt.date())],
+        "train_seasons": train_seasons,
+        "test_season": test_season,
         "n_matches": len(df),
         "n_features": len(X.columns),
         "best_xgb_params": {k: v if not isinstance(v, (np.integer, np.floating)) else int(v) if isinstance(v, np.integer) else float(v) for k, v in best_params.items()},
         "model_type": "ensemble_xgb_poisson",
+        "model_version": "v3.2_more_data",
     }
 
     model_path = MODEL_DIR / "predictor.joblib"
