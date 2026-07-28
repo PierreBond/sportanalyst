@@ -968,18 +968,21 @@ async def get_value_bets(
         h_prob = float(row["home_win_prob"]) if row.get("home_win_prob") else 0.0
         d_prob = float(row["draw_prob"]) if row.get("draw_prob") else 0.0
         a_prob = float(row["away_win_prob"]) if row.get("away_win_prob") else 0.0
-        if row["home_odds"] > 0 and row["home_odds"] == best_odds:
-            implied_prob = round(1 / row["home_odds"], 4)
+        home_odds_f = float(row["home_odds"]) if row["home_odds"] else 0.0
+        away_odds_f = float(row["away_odds"]) if row["away_odds"] else 0.0
+        draw_odds_f = float(row["draw_odds"]) if row["draw_odds"] else 0.0
+        if home_odds_f > 0 and home_odds_f == float(best_odds):
+            implied_prob = round(1.0 / home_odds_f, 4)
             model_prob = h_prob or implied_prob
             edge = round(model_prob - implied_prob, 4)
             selection = "home_win"
-        elif row["away_odds"] > 0 and row["away_odds"] == best_odds:
-            implied_prob = round(1 / row["away_odds"], 4)
+        elif away_odds_f > 0 and away_odds_f == float(best_odds):
+            implied_prob = round(1.0 / away_odds_f, 4)
             model_prob = a_prob or implied_prob
             edge = round(model_prob - implied_prob, 4)
             selection = "away_win"
         else:
-            implied_prob = round(1 / row["draw_odds"], 4) if row["draw_odds"] else 0.0
+            implied_prob = round(1.0 / draw_odds_f, 4) if draw_odds_f else 0.0
             model_prob = d_prob or implied_prob
             edge = round(model_prob - implied_prob, 4)
             selection = "draw"
