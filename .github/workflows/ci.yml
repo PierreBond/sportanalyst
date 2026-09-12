@@ -101,7 +101,7 @@ jobs:
 
       - name: Check for secrets
         run: |
-          detect-secrets scan --report-type json > secrets-report.json
+          detect-secrets scan --all-files > secrets-report.json
           python - <<'PY'
           import json
           from pathlib import Path
