@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
 
 from sports_common.config import settings
 from sports_common.kafka_client import KafkaProducerWrapper

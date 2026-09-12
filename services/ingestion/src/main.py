@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-import structlog
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Query
 from pydantic import BaseModel
 
 from sports_common.config import get_settings
@@ -36,7 +33,6 @@ async def lifespan(app: FastAPI):
     logger.info("ingestion_service_starting")
 
     settings = get_settings()
-    league_config = get_league_config()
     processor = get_ingesting_processor()
 
     leagues_to_process = processor.get_leagues_to_process()
@@ -100,7 +96,6 @@ async def trigger_ingestion(
 
     All parameters are optional and override the defaults.
     """
-    logger = get_logger(__name__)
     processor = get_ingesting_processor(
         batch_size=batch_size,
         max_concurrent_leagues=max_concurrent_leagues,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import AsyncIterator
 
-import httpx
 
 from sports_common.schemas.events import MatchEvent
 from sports_common.schemas.odds import OddsSnapshot

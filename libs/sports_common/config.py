@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from pydantic import Field, model_validator
@@ -182,13 +181,13 @@ class Settings(BaseSettings):
     def league_allowlist_set(self) -> set[str]:
         if not self.league_allowlist:
             return set()
-        return {l.strip() for l in self.league_allowlist.split(",") if l.strip()}
+        return {item.strip() for item in self.league_allowlist.split(",") if item.strip()}
 
     @property
     def league_blocklist_set(self) -> set[str]:
         if not self.league_blocklist:
             return set()
-        return {l.strip() for l in self.league_blocklist.split(",") if l.strip()}
+        return {item.strip() for item in self.league_blocklist.split(",") if item.strip()}
 
     def should_process_league(self, league: str) -> bool:
         """Determine if a league should be processed based on allow/block lists.

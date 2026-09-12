@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -121,6 +120,8 @@ class BayesianTeamModel(BaseModel):
         self._league_strength = best[2 * n_teams + 1] if 2 * n_teams + 1 < len(best) else 0.0
         self._prior_strength = 0.0
 
+        from sports_common.logging import get_logger
+        logger = get_logger(__name__)
         logger.info(
             "bayesian_model_trained",
             n_teams=n_teams,
@@ -221,8 +222,6 @@ class BayesianTeamModel(BaseModel):
         """Return team skill parameters as pseudo feature importance."""
         if not self._team_attack:
             return None
-
-        all_ratings = list(self._team_attack.values()) + list(self._team_defense.values())
 
         return {
             "home_advantage": float(self._home_advantage),

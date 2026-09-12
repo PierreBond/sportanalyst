@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import pytest
 
 from services.biometric_service.src.injury_risk import (
     InjuryRiskModel,
     calculate_injury_risk,
-    INJURY_PROBABILITY_THRESHOLD_HIGH,
     INJURY_PROBABILITY_THRESHOLD_MEDIUM,
 )
 

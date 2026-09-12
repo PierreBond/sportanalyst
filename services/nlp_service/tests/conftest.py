@@ -11,7 +11,7 @@ for p in [
     if p not in sys.path:
         sys.path.insert(0, p)
 
-import pytest
+import pytest  # noqa: E402
 
 
 @pytest.fixture

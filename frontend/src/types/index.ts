@@ -24,6 +24,8 @@ export interface PredictionResponse {
 
 export interface ValueBet {
   match_id: string;
+  home_team: string;
+  away_team: string;
   selection: string;
   model_prob: number;
   best_odds: number;
@@ -61,6 +63,21 @@ export interface HealthResponse {
   status: "healthy" | "unhealthy";
   service: string;
   version?: string;
+}
+
+export interface ModelInfo {
+  name: string;
+  version: string;
+  stage: string;
+  accuracy: number;
+  brier_score: number;
+  trained_at: string;
+  n_matches: number;
+  n_features: number;
+}
+
+export interface ModelsResponse {
+  models: ModelInfo[];
 }
 
 export interface MatchResearchSnapshot {

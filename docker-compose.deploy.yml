@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: sports-postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: sportspred
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: sports-backend
+    ports:
+      - "8005:8005"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
+      DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
+      API_KEY: ${API_KEY:-yhYFZIBxoz7cY2vrBVwh3SnWZgqaSy/cLDt4ElHeeoM=}
+      MODEL_PATH: /app/models/predictor.joblib
+      MODEL_METADATA_PATH: /app/models/predictor_metadata.json
+    depends_on:
+      postgres:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://backend:8005
+    container_name: sports-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8005
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

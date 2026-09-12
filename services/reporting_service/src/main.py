@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import structlog
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from sports_common.logging import setup_logging, get_logger

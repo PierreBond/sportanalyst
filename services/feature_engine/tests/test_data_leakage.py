@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from datetime import datetime, timezone, timedelta
 import pandas as pd
 
@@ -86,10 +85,7 @@ class TestDataLeakage:
         from services.feature_engine.src.store import FeatureStoreWriter
 
         with patch("services.feature_engine.src.store.create_async_engine"):
-            writer = FeatureStoreWriter()
-
-        match_id = "test-match-id"
-        features = {"rolling_avg_goals_5": 1.5}
+            FeatureStoreWriter()
 
         computed_at = datetime.now(timezone.utc)
         prediction_time = computed_at + timedelta(hours=1)

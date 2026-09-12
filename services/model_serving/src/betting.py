@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import Enum
-from typing import Any
-from uuid import uuid4
 
-import numpy as np
 
 from sports_common.schemas.predictions import ValueBet
 

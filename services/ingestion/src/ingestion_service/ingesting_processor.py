@@ -38,10 +38,6 @@ class IngestingLeagueProcessor:
     ) -> None:
         from .league_processor import (
             LeagueProcessor,
-            DEFAULT_BATCH_SIZE,
-            DEFAULT_MAX_CONCURRENT_LEAGUES,
-            DEFAULT_MAX_CONCURRENT_REQUESTS,
-            DEFAULT_LEAGUE_TIMEOUT_SECONDS,
         )
 
         self._settings = get_settings()

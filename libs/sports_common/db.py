@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -56,7 +55,7 @@ class DatabaseClient:
                 raise
 
     async def init_db(self) -> None:
-        async with self.engine.begin() as conn:
+        async with self.engine.begin() as _conn:
             logger.info("database_connection_established")
 
     async def close(self) -> None:

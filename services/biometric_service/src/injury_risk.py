@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import numpy as np
 
 from sports_common.logging import get_logger
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import httpx
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 

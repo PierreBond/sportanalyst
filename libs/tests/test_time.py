@@ -1,4 +1,3 @@
-import pytest
 from datetime import datetime, timezone
 
 from sports_common.utils.time import (

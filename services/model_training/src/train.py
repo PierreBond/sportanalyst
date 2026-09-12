@@ -5,13 +5,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from data_loader import DataLoader
-from models.base_model import ModelMeta
 from models.poisson import create_poisson_model
 from models.bayesian import create_bayesian_model
 from models.gradient_boosting import create_xgboost_model, create_random_forest_model
@@ -72,7 +70,7 @@ def train_model(
     """Train a single model and return metrics."""
     logger.info("training_model", model=model_name)
 
-    model_config = config.get("model", {})
+    _model_config = config.get("model", {})
     data_config = config.get("data", {})
     hyperparams = config.get("hyperparameters", {})
 
@@ -124,7 +122,7 @@ def train_model(
         )
         metrics.update({f"test_{k}": v for k, v in test_metrics.items()})
 
-    feature_names = data_loader.get_feature_names(X_train)
+    _feature_names = data_loader.get_feature_names(X_train)
 
     with registry.start_run(run_name=f"{model_name}_training"):
         registry.log_params(hyperparams)

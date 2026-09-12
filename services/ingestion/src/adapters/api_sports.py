@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
 from typing import AsyncIterator
 
-import httpx
 
 from sports_common.schemas.events import MatchEvent
 from sports_common.schemas.odds import OddsSnapshot
@@ -67,7 +64,7 @@ class APISportsAdapter(BaseAdapter):
         endpoint = f"odds?fixture={match_external_id}"
         try:
             response = await self.fetch_with_retry("GET", endpoint)
-            data = response.json()
+            _data = response.json()
             return []
         except Exception as e:
             logger.error("fetch_odds_failed", provider=self.provider_name, error=str(e))

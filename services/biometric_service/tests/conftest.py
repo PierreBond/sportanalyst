@@ -8,7 +8,7 @@ libs_path = str(project_root / "libs")
 if libs_path not in sys.path:
     sys.path.insert(0, libs_path)
 
-import pytest
+import pytest  # noqa: E402
 
 
 def pytest_configure(config: pytest.Config) -> None:

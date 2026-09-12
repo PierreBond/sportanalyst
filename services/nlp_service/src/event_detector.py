@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from typing import Any
 
 from sports_common.logging import get_logger
 from sports_common.schemas.sentiment import NewsAlert

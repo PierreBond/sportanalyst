@@ -18,5 +18,5 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 testpaths = ["libs/tests", "services"]
-pythonpath = ["libs"]
-addopts = ["--import-mode=importlib"]
+pythonpath = [".", "libs"]
+addopts = ["--import-mode=prepend"]

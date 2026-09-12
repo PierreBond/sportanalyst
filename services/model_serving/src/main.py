@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import unicodedata
 import uuid
 from collections.abc import AsyncGenerator
@@ -12,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 import structlog
 from fastapi import (
     Depends,
@@ -30,17 +28,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sports_common.db import get_db
 from sports_common.logging import setup_logging, get_logger
-from sports_common.schemas.predictions import MatchPrediction
 from sports_common.security import setup_security
 
 try:
-    from .betting import BettingEngine, BetSelection
+    from .betting import BettingEngine
     from .cache import PredictionCache
     from .calibrator import ProbabilityCalibrator
     from .explainer import PredictionExplainer
     from .predictor import ModelPredictor
 except ImportError:
-    from betting import BettingEngine, BetSelection
+    from betting import BettingEngine
     from cache import PredictionCache
     from calibrator import ProbabilityCalibrator
     from explainer import PredictionExplainer
@@ -407,9 +404,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """Check service health status."""
-    cache_status = "connected" if _cache and _cache._connected else "disconnected"
-    calibrator_status = "loaded" if _calibrator and _calibrator.is_fitted else "not_loaded"
-
     return HealthResponse(
         status="healthy",
         service="model-serving",
@@ -893,7 +887,7 @@ async def websocket_live_predictions(websocket: WebSocket, match_id: str) -> Non
         )
 
         while True:
-            data = await websocket.receive_text()
+            await websocket.receive_text()
             await websocket.send_json(
                 {
                     "type": "prediction_update",
@@ -959,7 +953,6 @@ async def get_value_bets(
         except Exception as e:
             logger.warning("value_bets_query_failed", error=str(e))
 
-    now_dt = datetime.now(timezone.utc)
     value_bets = []
     for row in rows:
         best_odds = max(row["home_odds"], row["draw_odds"], row["away_odds"])

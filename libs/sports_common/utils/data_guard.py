@@ -55,7 +55,6 @@ def verify_no_future_information(
     prediction_col: str,
 ) -> bool:
     for idx, row in df.iterrows():
-        row_timestamp = row[timestamp_col]
         for feature_col in feature_cols:
             if feature_col in df.columns:
                 if row[feature_col] is not None:

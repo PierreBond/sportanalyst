@@ -6,7 +6,6 @@ from typing import Any
 
 import structlog
 
-from .config import settings
 
 
 def setup_logging(service_name: str = "sports-common") -> None:

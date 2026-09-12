@@ -1,0 +1,27 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv
+
+COPY libs/ /app/libs/
+COPY services/model_serving/ /app/services/model_serving/
+COPY models/ /app/models/
+COPY train_model.py /app/train_model.py
+
+WORKDIR /app/libs
+RUN uv pip install --system -e .
+
+WORKDIR /app/services/model_serving
+RUN uv pip install --system -e .
+
+WORKDIR /app
+
+ENV PYTHONPATH=/app
+ENV MODEL_PATH=/app/models/predictor.joblib
+ENV MODEL_METADATA_PATH=/app/models/predictor_metadata.json
+ENV XGBOOST_SERVER=cpu
+
+EXPOSE 8005
+
+CMD ["uvicorn", "services.model_serving.src.main:app", "--host", "0.0.0.0", "--port", "8005"]

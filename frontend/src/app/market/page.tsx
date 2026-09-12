@@ -215,7 +215,7 @@ export default function MarketPage() {
                     <tr key={`${bet.match_id}-${bet.selection}-${idx}`} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm">
                         <Link href={`/matches/${bet.match_id}`} className="text-blue-600 hover:text-blue-800">
-                          {bet.match_id}
+                          {bet.home_team} vs {bet.away_team}
                         </Link>
                       </td>
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">

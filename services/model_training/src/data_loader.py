@@ -3,12 +3,10 @@ from __future__ import annotations
 import sys
 import importlib.util
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
-import numpy as np
 import pandas as pd
-import structlog
 from sqlalchemy import select, and_
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -30,9 +28,8 @@ def _load_alembic_models() -> tuple[Any, Any]:
 
 
 Match, FeatureStore = _load_alembic_models()
-from sports_common.config import settings
-from sports_common.db import get_async_session
-from sports_common.logging import get_logger
+from sports_common.db import get_async_session  # noqa: E402
+from sports_common.logging import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 

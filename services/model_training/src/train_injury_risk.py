@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
-import pandas as pd
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -29,7 +28,7 @@ def train_injury_risk_model(
 ) -> tuple[InjuryRiskModel, dict]:
     """Train injury risk model and return with metrics."""
     model_config = config.get("model", {})
-    data_config = config.get("data", {})
+    _data_config = config.get("data", {})
     hyperparams = config.get("hyperparameters", {})
 
     start_date = datetime(2023, 1, 1, tzinfo=timezone.utc)

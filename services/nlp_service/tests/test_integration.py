@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -310,7 +309,6 @@ class TestNLPPipelineIntegration:
         ]
         entity_ids = ["team_1"] * 4
         sources = ["twitter"] * 4
-        timestamps = [datetime.now(timezone.utc)] * 4
 
         cleaned_texts = [preprocessor.clean(text) for text in raw_texts]
 
@@ -340,7 +338,7 @@ class TestNLPPipelineIntegration:
     def test_pipeline_data_flow(self):
         """Test that data flows correctly through pipeline stages."""
         from preprocessing import TextPreprocessor
-        from classifier import SentimentClassifier, SentimentAggregator
+        from classifier import SentimentAggregator
         from event_detector import EventDetector
 
         preprocessor = TextPreprocessor()
@@ -374,15 +372,12 @@ class TestNLPServiceEndpoints:
 
     def test_health_endpoint(self):
         """Test health check returns healthy status."""
-        from fastapi.testclient import TestClient
 
         with patch("sys.modules", {"sports_common": MagicMock()}):
             pass
 
     def test_sentiment_request_model(self):
         """Test sentiment request/response models."""
-        from pydantic import ValidationError
-        from sports_common.schemas.sentiment import SentimentResult, RawTextPayload
 
         sentiment = SentimentResult(
             entity_type="team",

@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { DataSourceBadge } from "@/components/DataSourceBadge";
-import { getBatchPredictions, getUpcomingMatches, getValueBets } from "@/lib/api";
-import type { PredictionResponse, UpcomingMatch } from "@/types";
+import { getBatchPredictions, getModels, getUpcomingMatches, getValueBets } from "@/lib/api";
+import type { ModelInfo, PredictionResponse, UpcomingMatch } from "@/types";
 
 export default function HomePage() {
   const [loading, setLoading] = useState(true);
@@ -12,13 +12,18 @@ export default function HomePage() {
   const [upcomingMatches, setUpcomingMatches] = useState<UpcomingMatch[]>([]);
   const [predictions, setPredictions] = useState<PredictionResponse[]>([]);
   const [valueBetCount, setValueBetCount] = useState(0);
+  const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
 
   useEffect(() => {
     async function loadOverviewData() {
       setLoading(true);
       try {
-        const fixtures = await getUpcomingMatches(100);
+        const [fixtures, models] = await Promise.all([
+          getUpcomingMatches(100),
+          getModels(),
+        ]);
         setUpcomingMatches(fixtures.matches);
+        setModelInfo(models.models[0] || null);
 
         const { predictions: livePredictions } = await getBatchPredictions(
           fixtures.matches.map((m) => m.match_id)
@@ -54,6 +59,11 @@ export default function HomePage() {
         <p className="mt-2 text-gray-600">
           Live rollup from upcoming fixtures, prediction, and market endpoints.
         </p>
+        {modelInfo && (
+          <p className="mt-1 text-sm text-gray-500">
+            Model: {modelInfo.version} · Accuracy {(modelInfo.accuracy * 100).toFixed(1)}% · {modelInfo.n_features} features
+          </p>
+        )}
         <div className="mt-3">
           <DataSourceBadge
             label="Live API"

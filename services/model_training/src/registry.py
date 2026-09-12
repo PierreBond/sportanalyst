@@ -6,10 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import mlflow
-import numpy as np
 import pandas as pd
-import structlog
-import yaml
 from mlflow.tracking import MlflowClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -57,7 +54,7 @@ class ModelRegistry:
             "features": features,
             "feature_count": len(features),
         }
-        manifest_json = json.dumps(manifest, indent=2)
+        _manifest_json = json.dumps(manifest, indent=2)
 
         with mlflow.start_run():
             mlflow.log_dict(manifest, "feature_manifest.json")

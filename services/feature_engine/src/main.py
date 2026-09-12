@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import os
-import sys
-from datetime import datetime, timezone
-from typing import Any
 
+import pandas as pd
 import structlog
 from pyspark.sql import SparkSession, DataFrame, Window
 from pyspark.sql import functions as F
@@ -13,26 +11,11 @@ from pyspark.sql.types import (
     StructField,
     StringType,
     DoubleType,
-    IntegerType,
     TimestampType,
 )
 
 from sports_common.config import settings
-from sports_common.kafka_client import AsyncKafkaConsumer
 
-from temporal import (
-    add_rolling_avg,
-    add_rolling_std,
-    add_momentum_slope,
-    add_lag_feature,
-    add_rest_days,
-)
-from market import (
-    compute_market_features,
-    odds_to_implied_probability,
-)
-from biometric import aggregate_team_biometrics
-from sentiment import compute_sentiment_features
 from store import FeatureStoreWriter
 
 logger = structlog.get_logger(__name__)
@@ -561,7 +544,6 @@ def run_streaming_feature_pipeline(spark: SparkSession) -> None:
 def main() -> None:
     """Main entry point for feature engineering pipeline."""
     import argparse
-    import pandas as pd
 
     parser = argparse.ArgumentParser(description="Feature Engineering Pipeline")
     parser.add_argument("--mode", choices=["batch", "streaming"], default="batch")

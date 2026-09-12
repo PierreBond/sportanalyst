@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Any
+from typing import Any
 
-import structlog
 
 from sports_common.config import settings
 from sports_common.logging import get_logger

@@ -9,6 +9,7 @@ import pytest
 def pytest_configure(config: pytest.Config) -> None:
     project_root = Path(__file__).parent.parent.parent
     for p in [
+        str(project_root),
         str(project_root / "libs"),
         str(project_root / "services" / "model_serving" / "src"),
     ]:

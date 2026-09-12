@@ -88,7 +88,7 @@ def compute_calibration_curve(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute calibration curve for reliability diagram."""
     bin_edges = np.linspace(0, 1, n_bins + 1)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    _bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
     true_probs = []
     pred_probs = []
