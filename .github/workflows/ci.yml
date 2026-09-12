@@ -22,7 +22,7 @@ jobs:
 
       - name: Lint Python
         run: |
-          uv pip install ruff
+          uv pip install --system ruff
           ruff check libs/ services/
 
   test:
@@ -52,8 +52,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv
-          uv pip install pytest pytest-cov pytest-asyncio httpx numpy pandas pyyaml redis scikit-learn fastapi structlog sqlalchemy asyncpg pydantic pydantic-settings kafka-python xgboost shap joblib
-          cd libs && uv pip install -e ".[dev]" && cd ..
+          uv pip install --system pytest pytest-cov pytest-asyncio httpx numpy pandas pyyaml redis scikit-learn fastapi structlog sqlalchemy asyncpg pydantic pydantic-settings kafka-python xgboost shap joblib
+          cd libs && uv pip install --system -e ".[dev]" && cd ..
 
       - name: Run backend tests
         run: |
@@ -169,10 +169,11 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv pytest pandas numpy
-          cd libs && uv pip install -e ".[dev]" && cd ..
+          cd libs && uv pip install --system -e ".[dev]" && cd ..
 
       - name: Run data leakage tests
-        run: pytest services/feature_engine/tests/test_data_leakage.py -v
+        run: |
+          PYTHONPATH=".:libs" pytest services/feature_engine/tests/test_data_leakage.py -v
 
   benchmark:
     runs-on: ubuntu-latest
@@ -187,8 +188,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv
-          uv pip install numpy pandas scikit-learn xgboost joblib pydantic pydantic-settings structlog pyyaml
-          cd libs && uv pip install -e . && cd ..
+          uv pip install --system numpy pandas scikit-learn xgboost joblib pydantic pydantic-settings structlog pyyaml
+          cd libs && uv pip install --system -e . && cd ..
 
       - name: Run benchmark script
         run: python scripts/benchmark_classical_vs_deep.py
