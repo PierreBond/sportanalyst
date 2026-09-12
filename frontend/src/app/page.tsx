@@ -87,7 +87,7 @@ export default function HomePage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-2">
             Active Predictions
@@ -110,6 +110,18 @@ export default function HomePage() {
           </h3>
           <p className="text-4xl font-bold text-purple-600">{valueBetCount}</p>
           <p className="text-sm text-gray-500 mt-1">Positive EV opportunities</p>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            Model Confidence
+          </h3>
+          <p className="text-sm text-gray-700">
+            When confident (&gt;55%), accuracy: <span className="font-bold text-green-600">65-86%</span>
+          </p>
+          <p className="text-sm text-gray-500 mt-1">
+            Overall: 49% across 2,844 test matches
+          </p>
         </div>
       </div>
 

@@ -32,6 +32,13 @@ export function PredictionCard({ prediction }: PredictionCardProps) {
     probabilities.away_win
   );
 
+  const confidenceColor =
+    maxProb >= 0.55
+      ? "bg-green-100 text-green-700"
+      : maxProb >= 0.50
+        ? "bg-yellow-100 text-yellow-700"
+        : "bg-red-100 text-red-600";
+
   const getOutcomeClass = (prob: number) => {
     if (prob === maxProb) {
       return "bg-blue-600 text-white";
@@ -53,9 +60,14 @@ export function PredictionCard({ prediction }: PredictionCardProps) {
                 {prediction.away_team}
               </span>
             </div>
-            <span className="text-xs text-gray-500">
-              {prediction.league}
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${confidenceColor}`}>
+                {(maxProb * 100).toFixed(0)}%
+              </span>
+              <span className="text-xs text-gray-500">
+                {prediction.league}
+              </span>
+            </div>
           </div>
         </div>
 
