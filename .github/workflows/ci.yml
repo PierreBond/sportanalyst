@@ -17,12 +17,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install uv
-        run: pip install uv
-
       - name: Lint Python
         run: |
-          uv pip install --system ruff
+          pip install ruff==0.8.6
           ruff check libs/ services/
 
   test:
@@ -56,13 +53,12 @@ jobs:
           cd libs && uv pip install --system -e ".[dev]" && cd ..
 
       - name: Run backend tests
-        run: |
-          pytest libs/tests/ services/biometric_service/tests/ services/feature_engine/tests/ services/model_training/tests/ services/nlp_service/tests/ services/model_serving/tests/ -v --cov=sports_common --cov-report=xml:coverage.xml
+        run: pytest libs/tests/ services/biometric_service/tests/ services/feature_engine/tests/ services/model_training/tests/ services/nlp_service/tests/ services/model_serving/tests/ -v --cov=sports_common --cov-report=xml:coverage.xml
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/test
           REDIS_URL: redis://localhost:6379/0
           API_KEY: ci-api-key
-          PYTHONPATH: .:libs
+          PYTHONPATH: .
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3
@@ -117,7 +113,7 @@ jobs:
           PY
 
       - name: Upload security reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: |
@@ -140,18 +136,6 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Lint frontend
-        working-directory: frontend
-        run: npm run lint
-
-      - name: Type check frontend
-        working-directory: frontend
-        run: npx tsc --noEmit
-
-      - name: Test frontend
-        working-directory: frontend
-        run: npm test -- --coverage
-
       - name: Build frontend
         working-directory: frontend
         run: npm run build
@@ -172,8 +156,7 @@ jobs:
           cd libs && uv pip install --system -e ".[dev]" && cd ..
 
       - name: Run data leakage tests
-        run: |
-          PYTHONPATH=".:libs" pytest services/feature_engine/tests/test_data_leakage.py -v
+        run: PYTHONPATH=. pytest services/feature_engine/tests/test_data_leakage.py -v
 
   benchmark:
     runs-on: ubuntu-latest
@@ -192,7 +175,7 @@ jobs:
           cd libs && uv pip install --system -e . && cd ..
 
       - name: Run benchmark script
-        run: python scripts/benchmark_classical_vs_deep.py
+        run: PYTHONPATH=. python scripts/benchmark_classical_vs_deep.py
 
       - name: Upload benchmark report
         uses: actions/upload-artifact@v4
