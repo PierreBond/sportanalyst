@@ -106,18 +106,17 @@ jobs:
           import json
           from pathlib import Path
 
-          import os
+          def norm(p):
+              return p.replace("\\", "/")
+
           report = json.loads(Path("secrets-report.json").read_text())
           baseline = json.loads(Path(".secrets.baseline").read_text())
           results = report.get("results", {})
-          baseline_results = baseline.get("results", {})
-          # Normalize paths for cross-platform comparison
-          norm = {k.replace(os.sep, "/"): v for k, v in baseline_results.items()}
+          baseline_map = {norm(k): v for k, v in baseline.get("results", {}).items()}
           new_secrets = {}
           for fname, findings in results.items():
-              norm_name = fname.replace(os.sep, "/")
-              baseline_hashes = {f["hashed_secret"] for f in norm.get(norm_name, [])}
-              new = [f for f in findings if f["hashed_secret"] not in baseline_hashes]
+              bh = {f["hashed_secret"] for f in baseline_map.get(norm(fname), [])}
+              new = [f for f in findings if f["hashed_secret"] not in bh]
               if new:
                   new_secrets[fname] = new
           if new_secrets:
