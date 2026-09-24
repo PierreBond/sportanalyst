@@ -41,6 +41,8 @@ services:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://backend:8005
+      BACKEND_INTERNAL_URL: http://backend:8005
+      BACKEND_API_KEY: ${API_KEY:-yhYFZIBxoz7cY2vrBVwh3SnWZgqaSy/cLDt4ElHeeoM=}
     depends_on:
       - backend
     restart: unless-stopped

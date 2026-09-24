@@ -3,3 +3,5 @@ node_modules
 npm_test.log
 .git
 .gitignore
+.env*
+.env.local
