@@ -8,7 +8,8 @@ import httpx
 from sqlalchemy import create_engine, text
 
 DB_URL = os.environ.get("DATABASE_URL_SYNC")
-ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
+# strip inline "# comment" some .env parsers keep in the value
+ODDS_API_KEY = (os.environ.get("ODDS_API_KEY") or "").split("#")[0].strip()
 LEAGUE_SPORT_MAP = {
     "brasileirao": "soccer_brazil_campeonato",
     "bundesliga": "soccer_germany_bundesliga",

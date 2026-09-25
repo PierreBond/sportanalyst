@@ -47,5 +47,31 @@ services:
       - backend
     restart: unless-stopped
 
+  # daily odds pull + prediction refresh; scheduler lives in-container
+  # (no host Task Scheduler, GitHub runners can't reach postgres:5432)
+  odds-refresh:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: sports-odds-refresh
+    environment:
+      # DATABASE_URL satisfies sports_common.Settings import (sync scripts use _SYNC)
+      DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
+      DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
+      ODDS_API_KEY: ${ODDS_API_KEY}
+      REFRESH_DELAY: "21600"     # initial stagger: 6h
+      REFRESH_INTERVAL: "86400"  # then every 24h
+    command: >
+      sh -c "sleep $$REFRESH_DELAY;
+             while true; do
+               python scripts/pull_odds.py || true;
+               python scripts/batch_predict.py || true;
+               sleep $$REFRESH_INTERVAL;
+             done"
+    depends_on:
+      postgres:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   postgres_data:

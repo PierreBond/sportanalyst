@@ -6,6 +6,7 @@ RUN pip install --no-cache-dir uv
 
 COPY libs/ /app/libs/
 COPY services/model_serving/ /app/services/model_serving/
+COPY scripts/ /app/scripts/
 COPY models/ /app/models/
 COPY train_model.py /app/train_model.py
 
@@ -14,6 +15,9 @@ RUN uv pip install --system -e .
 
 WORKDIR /app/services/model_serving
 RUN uv pip install --system -e .
+
+# sync DB scripts (pull_odds, batch_predict) use psycopg2
+RUN uv pip install --system psycopg2-binary
 
 WORKDIR /app
 
