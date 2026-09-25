@@ -66,6 +66,11 @@ def main():
     if len(preds) == 0:
         print("n=0 — no finished matches carry stored predictions yet (grows daily)")
         return
+    # same-sample: only matches that have odds (market comparison needs them)
+    preds = preds[preds.match_id.isin(mkt.match_id)].copy()
+    if len(preds) == 0:
+        print("n=0 — settled predictions lack odds snapshots (grows daily)")
+        return
     y2 = (preds.home_score < preds.away_score).astype(int) * 2 \
         + (preds.home_score == preds.away_score).astype(int)
     mp = preds[["home_win_prob", "draw_prob", "away_win_prob"]].astype(float)
@@ -74,10 +79,9 @@ def main():
     model_brier = brier(mp, y2)
     line = f"n={len(preds)}  model Brier={model_brier:.4f}  model accuracy={model_acc:.4f}"
     sub = mkt[mkt.match_id.isin(preds.match_id)]
-    if len(sub):
-        sub_acc = float((sub[["h", "d", "a"]].values.argmax(axis=1) == sub.y).mean())
-        sub_brier = brier(sub[["h", "d", "a"]], sub.y)
-        line += f"  | same matches: market Brier={sub_brier:.4f}  market acc={sub_acc:.4f}"
+    sub_acc = float((sub[["h", "d", "a"]].values.argmax(axis=1) == sub.y).mean())
+    sub_brier = brier(sub[["h", "d", "a"]], sub.y)
+    line += f"  | market on same matches: Brier={sub_brier:.4f}  acc={sub_acc:.4f}"
     print(line)
 
 

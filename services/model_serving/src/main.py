@@ -1036,8 +1036,87 @@ async def get_report_pdf(match_id: str) -> dict[str, Any]:
     }
 
 
+# Settlement benchmark: model vs market (vig-normalized implied odds) vs actual
+# outcomes on FT matches with h2h odds. Three scopes: full market history,
+# predictions with settled results, and market on those same prediction matches.
+_SETTLEMENT_SQL = text("""
+    WITH latest AS (
+        SELECT DISTINCT ON (match_id) match_id, home_odds, draw_odds, away_odds
+        FROM odds_snapshots
+        WHERE market_type = 'h2h'
+          AND home_odds IS NOT NULL AND draw_odds IS NOT NULL AND away_odds IS NOT NULL
+          AND least(home_odds, draw_odds, away_odds) > 1.01
+        ORDER BY match_id, (sportsbook = 'Pinnacle') DESC, captured_at DESC
+    ),
+    settled AS (
+        SELECT m.match_id,
+               CASE WHEN m.home_score > m.away_score THEN 0
+                    WHEN m.home_score = m.away_score THEN 1
+                    ELSE 2 END AS outcome,
+               (1.0 / l.home_odds) / (1.0 / l.home_odds + 1.0 / l.draw_odds + 1.0 / l.away_odds) AS ih,
+               (1.0 / l.draw_odds) / (1.0 / l.home_odds + 1.0 / l.draw_odds + 1.0 / l.away_odds) AS id,
+               (1.0 / l.away_odds) / (1.0 / l.home_odds + 1.0 / l.draw_odds + 1.0 / l.away_odds) AS ia
+        FROM matches m
+        JOIN latest l ON l.match_id = m.match_id
+        WHERE m.status = 'FT'
+          AND m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+    ),
+    scored AS (
+        SELECT s.outcome, s.ih, s.id, s.ia,
+               p.home_win_prob, p.draw_prob, p.away_win_prob,
+               (power(s.ih - (s.outcome = 0)::int, 2) + power(s.id - (s.outcome = 1)::int, 2)
+                + power(s.ia - (s.outcome = 2)::int, 2)) / 3.0 AS mkt_brier,
+               (CASE WHEN s.ih >= s.id AND s.ih >= s.ia THEN 0
+                     WHEN s.id >= s.ia THEN 1 ELSE 2 END = s.outcome)::int AS mkt_hit
+        FROM settled s
+        LEFT JOIN predictions p ON p.match_id = s.match_id
+    )
+    SELECT 'market' AS scope, count(*)::int AS n,
+           avg(mkt_brier) AS brier, avg(mkt_hit) AS accuracy
+    FROM scored
+    UNION ALL
+    SELECT 'model', count(*)::int,
+           avg((power(home_win_prob - (outcome = 0)::int, 2) + power(draw_prob - (outcome = 1)::int, 2)
+                + power(away_win_prob - (outcome = 2)::int, 2)) / 3.0),
+           avg((CASE WHEN home_win_prob >= draw_prob AND home_win_prob >= away_win_prob THEN 0
+                      WHEN draw_prob >= away_win_prob THEN 1 ELSE 2 END = outcome)::int)
+    FROM scored
+    WHERE home_win_prob IS NOT NULL
+    UNION ALL
+    SELECT 'market_on_model', count(*)::int, avg(mkt_brier), avg(mkt_hit)
+    FROM scored
+    WHERE home_win_prob IS NOT NULL
+""")
+
+
+async def _settlement_stats(db: AsyncSession | None) -> dict[str, Any] | None:
+    """Return market/model settlement metrics; None when DB unavailable."""
+    if db is None:
+        return None
+    try:
+        result = await db.execute(_SETTLEMENT_SQL)
+        scopes: dict[str, dict[str, Any]] = {}
+        for row in result.all():
+            r = row._mapping
+            scopes[r["scope"]] = {
+                "n": int(r["n"]),
+                "brier": round(float(r["brier"]), 4) if r["brier"] is not None else None,
+                "accuracy": round(float(r["accuracy"]), 4) if r["accuracy"] is not None else None,
+            }
+        if not scopes:
+            return None
+        return {
+            "market": scopes.get("market", {"n": 0, "brier": None, "accuracy": None}),
+            "model": scopes.get("model", {"n": 0, "brier": None, "accuracy": None}),
+            "market_on_model": scopes.get("market_on_model", {"n": 0, "brier": None, "accuracy": None}),
+        }
+    except Exception as e:
+        logger.warning("settlement_query_failed", error=str(e))
+        return None
+
+
 @app.get("/models")
-async def list_models() -> dict[str, Any]:
+async def list_models(db: AsyncSession | None = Depends(get_optional_db)) -> dict[str, Any]:
     """List available prediction models and their metadata."""
     meta_path = _metadata_path()
     meta = {}
@@ -1058,6 +1137,7 @@ async def list_models() -> dict[str, Any]:
                 "trained_at": meta.get("trained_at", "unknown"),
                 "n_matches": meta.get("n_matches", 8538),
                 "n_features": meta.get("n_features", 37),
+                "settlement": await _settlement_stats(db),
             },
         ]
     }

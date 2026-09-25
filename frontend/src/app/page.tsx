@@ -126,6 +126,11 @@ export default function HomePage() {
               ? `Brier ${modelInfo.brier_score.toFixed(3)} · ${modelInfo.n_matches} matches · lower Brier is better`
               : "Metrics unavailable"}
           </p>
+          <p className="text-sm text-gray-500 mt-1">
+            {modelInfo?.settlement?.model?.n
+              ? `Settled ${modelInfo.settlement.model.n}: model vs market Brier ${modelInfo.settlement.model.brier?.toFixed(3)} vs ${modelInfo.settlement.market_on_model.brier?.toFixed(3)} · accuracy ${((modelInfo.settlement.model.accuracy ?? 0) * 100).toFixed(1)}% vs ${((modelInfo.settlement.market_on_model.accuracy ?? 0) * 100).toFixed(1)}%`
+              : "Settled predictions: none yet"}
+          </p>
         </div>
       </div>
 

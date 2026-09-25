@@ -115,6 +115,8 @@ async def test_list_models(client):
     data = response.json()
     assert "models" in data
     assert len(data["models"]) > 0
+    # null without a live DB, populated in production
+    assert "settlement" in data["models"][0]
 
 
 @pytest.mark.asyncio

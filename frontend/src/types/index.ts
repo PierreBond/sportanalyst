@@ -65,6 +65,18 @@ export interface HealthResponse {
   version?: string;
 }
 
+export interface SettlementStats {
+  n: number;
+  brier: number | null;
+  accuracy: number | null;
+}
+
+export interface Settlement {
+  market: SettlementStats;
+  model: SettlementStats;
+  market_on_model: SettlementStats;
+}
+
 export interface ModelInfo {
   name: string;
   version: string;
@@ -74,6 +86,7 @@ export interface ModelInfo {
   trained_at: string;
   n_matches: number;
   n_features: number;
+  settlement?: Settlement | null;
 }
 
 export interface ModelsResponse {
