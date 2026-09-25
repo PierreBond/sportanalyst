@@ -51,8 +51,24 @@ df = pd.read_sql("""
     WHERE m.status='FT' AND m.scheduled_at >= '2026-01-01'
     ORDER BY m.scheduled_at
 """, engine)
+# same odds join as train_model.py: latest snapshot per match
+odds_df = pd.read_sql("""
+    SELECT DISTINCT ON (match_id) match_id::text, home_odds, draw_odds, away_odds
+    FROM odds_snapshots WHERE home_odds IS NOT NULL
+    ORDER BY match_id, captured_at DESC
+""", engine)
 engine.dispose()
-print(f"Loaded {len(df)} 2026 FT matches from DB")
+odds_df["match_id"] = odds_df["match_id"].astype(str)
+df = df.merge(odds_df, on="match_id", how="left")
+for c in ["home_odds", "draw_odds", "away_odds"]:
+    df[c] = df[c].fillna(0).astype(float)
+inv = {k: np.where(df[f"{f}_odds"] > 0, 1.0 / df[f"{f}_odds"].clip(lower=1.0001), 0.0)
+       for k, f in [("h", "home"), ("d", "draw"), ("a", "away")]}
+denom = inv["h"] + inv["d"] + inv["a"]
+df["home_implied_prob"] = np.where(denom > 0, inv["h"] / denom, 0.0)
+df["draw_implied_prob"] = np.where(denom > 0, inv["d"] / denom, 0.0)
+df["away_implied_prob"] = np.where(denom > 0, inv["a"] / denom, 0.0)
+print(f"Loaded {len(df)} 2026 FT matches from DB ({(df['home_odds'] > 0).sum()} with odds)")
 
 # Feature engineering
 def team_games_df(df):
@@ -151,7 +167,7 @@ X = pd.DataFrame({
     "league_encoded": df["league_enc"],
     **{f: df[f].astype(float) for f in FEATURES if f not in ["home_team_encoded","away_team_encoded","league_encoded"] and f in df.columns},
 })
-# no historical odds for 2026 (free tier); model has 0 splits on odds features, zeros are exact
+# matches without odds (Brasileirão history, unpicked fixtures) stay 0, as in training
 for f in FEATURES:
     if f not in X.columns:
         X[f] = 0.0

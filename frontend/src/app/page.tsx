@@ -114,18 +114,17 @@ export default function HomePage() {
 
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            Model Confidence
+            Model Quality
           </h3>
           <p className="text-sm text-gray-700">
-            When confident (&gt;55%), accuracy:{" "}
-            <span className="font-bold text-green-600">~47%</span>
+            {modelInfo
+              ? `Held-out accuracy: ${(modelInfo.accuracy * 100).toFixed(1)}%`
+              : "Held-out accuracy unavailable"}
           </p>
           <p className="text-sm text-gray-500 mt-1">
             {modelInfo
-              ? `Held-out test: ${(modelInfo.accuracy * 100).toFixed(1)}% across ${modelInfo.n_matches} matches`
-              : "Held-out test accuracy unavailable"}
-            <br />
-            2026 walk-forward (n=109 confident matches)
+              ? `Brier ${modelInfo.brier_score.toFixed(3)} · ${modelInfo.n_matches} matches · lower Brier is better`
+              : "Metrics unavailable"}
           </p>
         </div>
       </div>
