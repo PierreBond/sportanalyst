@@ -140,6 +140,7 @@ FEATURES = [
     "home_days_rest","away_days_rest","league_avg_total_goals",
     "h2h_home_gf_avg","h2h_away_gf_avg","h2h_home_wins","season",
     "home_elo","away_elo","elo_diff",
+    "home_odds","draw_odds","away_odds","home_implied_prob","draw_implied_prob","away_implied_prob",
 ]
 df["home_team_enc"] = df["home_team"].map(lambda x: le_team.transform([x])[0] if x in team_classes else 0)
 df["away_team_enc"] = df["away_team"].map(lambda x: le_team.transform([x])[0] if x in team_classes else 0)
@@ -148,8 +149,12 @@ df["league_enc"] = df["league"].map(lambda x: le_league.transform([x])[0] if x i
 X = pd.DataFrame({
     "home_team_encoded": df["home_team_enc"], "away_team_encoded": df["away_team_enc"],
     "league_encoded": df["league_enc"],
-    **{f: df[f].astype(float) for f in FEATURES if f not in ["home_team_encoded","away_team_encoded","league_encoded"]},
+    **{f: df[f].astype(float) for f in FEATURES if f not in ["home_team_encoded","away_team_encoded","league_encoded"] and f in df.columns},
 })
+# no historical odds for 2026 (free tier); model has 0 splits on odds features, zeros are exact
+for f in FEATURES:
+    if f not in X.columns:
+        X[f] = 0.0
 X = X[FEATURES]
 y = df["target"]
 
@@ -160,7 +165,10 @@ y_pred = y_prob.argmax(axis=1)
 acc = (y_pred==y).mean()
 from sklearn.metrics import confusion_matrix
 cm = confusion_matrix(y, y_pred)
-brier = np.mean([(y==i).astype(int)-y_prob[:,i] for i in range(3)])
+onehot = np.eye(3)[np.asarray(y)]
+brier = float(np.mean(np.sum((y_prob - onehot) ** 2, axis=1)))
+baseline_majority = float(np.bincount(np.asarray(y)).max() / len(y))
+baseline_home = float((np.asarray(y) == 0).mean())
 
 labels = {0:"H",1:"D",2:"A"}
 df["pred"] = y_pred; df["correct"] = (y_pred==y)
@@ -173,6 +181,13 @@ df["conf"] = df[["h_prob","d_prob","a_prob"]].max(axis=1)
 print(f"\n=== 2026 Season Validation ===")
 print(f"Matches: {len(df)}")
 print(f"Accuracy: {acc:.4f} ({y_pred[y_pred==y].shape[0]}/{len(y)})")
+print(f"Brier (multiclass): {brier:.4f}")
+print(f"Baselines: always-majority {baseline_majority:.4f}, always-home {baseline_home:.4f}")
+print("Confidence tiers (max prob -> accuracy):")
+for lo, hi in [(0.30, 0.55), (0.55, 0.65), (0.65, 0.75), (0.75, 1.01)]:
+    sub = df[(df["conf"] >= lo) & (df["conf"] < hi)]
+    acc_sub = sub["correct"].mean() if len(sub) else float("nan")
+    print(f"  {lo:.2f}-{min(hi, 1.0):.2f}: acc {acc_sub:.3f}  n={len(sub)}")
 print(f"Confusion matrix:\n{cm}")
 
 # Save report
@@ -183,8 +198,8 @@ wrong_top = df[~df["correct"]].sort_values("conf",ascending=False)
 md = f"""# Model Validation Report — 2026 Season (Brasileirão Série A)
 
 Generated: {now}
-Model: Tuned XGBoost (n_estimators=400, max_depth=4, lr=0.02)
-Training data: 8,538 matches (2022 — 2025-06-01)
+Model: {meta.get('model_version')} ({meta.get('n_matches')} training matches, {meta.get('n_features')} features)
+Training range: {meta.get('train_date_range')}
 Validation data: {len(df)} matches (2026 Brasileirão, pulled from football-data.org)
 
 ---
@@ -192,6 +207,21 @@ Validation data: {len(df)} matches (2026 Brasileirão, pulled from football-data
 ## Summary
 
 **Accuracy: {acc:.4f}** ({y_pred[y_pred==y].shape[0]}/{len(y)} correct)
+**Brier (multiclass): {brier:.4f}**
+**Baselines: always-majority {baseline_majority:.4f}, always-home {baseline_home:.4f}**
+
+### Confidence tiers
+
+| Max prob | Accuracy | n |
+|---|---|---|
+"""
+for lo, hi in [(0.30, 0.55), (0.55, 0.65), (0.65, 0.75), (0.75, 1.01)]:
+    sub = df[(df["conf"] >= lo) & (df["conf"] < hi)]
+    acc_sub = sub["correct"].mean() if len(sub) else float("nan")
+    md += f"| {lo:.2f}-{min(hi, 1.0):.2f} | {acc_sub:.3f} | {len(sub)} |\n"
+
+md += f"""
+---
 
 ### Confusion Matrix
 
