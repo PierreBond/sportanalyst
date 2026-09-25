@@ -728,13 +728,16 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
         "home_days_rest", "away_days_rest", "league_avg_total_goals",
         "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins", "season",
         "home_elo", "away_elo", "elo_diff",
+        "home_odds", "draw_odds", "away_odds",
+        "home_implied_prob", "draw_implied_prob", "away_implied_prob",
     ]}
     if db is None:
         return f
     try:
         r = (await db.execute(text("""
             SELECT ht.name AS home_team, at.name AS away_team,
-                   m.league, m.season, m.scheduled_at, m.home_team_id, m.away_team_id
+                   m.league, m.season, m.scheduled_at, m.home_team_id, m.away_team_id,
+                   m.match_id
             FROM matches m
             LEFT JOIN teams ht ON ht.team_id = m.home_team_id
             LEFT JOIN teams at ON at.team_id = m.away_team_id
@@ -811,6 +814,21 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
             f["h2h_home_wins"] = float(hr["h_win_rate"])
         else:
             f["h2h_home_wins"] = 0.5
+
+        # odds features: latest snapshot, implied probs de-vigged (matches training)
+        odd = (await db.execute(text("""
+            SELECT home_odds, draw_odds, away_odds FROM odds_snapshots
+            WHERE match_id = :mid ORDER BY captured_at DESC LIMIT 1
+        """), {"mid": r["match_id"]})).first()
+        if odd and odd[0]:
+            h_o, d_o, a_o = float(odd[0]), float(odd[1]), float(odd[2])
+            f["home_odds"], f["draw_odds"], f["away_odds"] = h_o, d_o, a_o
+            if h_o > 0 and d_o > 0 and a_o > 0:
+                inv_h, inv_d, inv_a = 1.0 / h_o, 1.0 / d_o, 1.0 / a_o
+                total = inv_h + inv_d + inv_a
+                f["home_implied_prob"] = inv_h / total
+                f["draw_implied_prob"] = inv_d / total
+                f["away_implied_prob"] = inv_a / total
     except Exception as e:
         logger.warning("feature_build_failed", match_id=match_id, error=str(e))
     return f
@@ -1041,11 +1059,14 @@ async def get_value_bets(
                 JOIN teams at ON m.away_team_id = at.team_id
                 LEFT JOIN predictions p ON p.match_id = m.match_id
             """
+            # ponytail: DISTINCT ON needs matching ORDER BY to pick latest snapshot
             if date:
-                q = text(base_sql + " WHERE DATE(m.scheduled_at) = DATE(:dt)")
+                q = text(base_sql + " WHERE DATE(m.scheduled_at) = DATE(:dt)"
+                         " ORDER BY os.match_id, os.captured_at DESC")
                 result = await db.execute(q, {"dt": date})
             else:
-                q = text(base_sql + " WHERE m.scheduled_at >= NOW() - INTERVAL '1 day'")
+                q = text(base_sql + " WHERE m.scheduled_at >= NOW() - INTERVAL '1 day'"
+                         " ORDER BY os.match_id, os.captured_at DESC")
                 result = await db.execute(q)
             rows = [dict(r._mapping) for r in result.all()]
         except Exception as e:
