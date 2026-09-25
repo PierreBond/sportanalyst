@@ -104,8 +104,7 @@ export default function MarketPage() {
         <div className="mt-3">
           <DataSourceBadge
             label="Live API"
-            detail="value-bets endpoint responds live; content may be simulated by backend"
-            tone="mixed"
+            detail="value-bets endpoint is live: model probabilities vs sportsbook odds (the-odds-api)"
           />
         </div>
       </div>

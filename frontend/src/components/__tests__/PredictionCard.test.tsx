@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { PredictionCard } from "../PredictionCard";
 import type { PredictionResponse } from "@/types";
 
@@ -40,9 +40,16 @@ describe("PredictionCard", () => {
   it("displays correct probability percentages", () => {
     render(<PredictionCard prediction={mockPrediction} />);
 
-    expect(screen.getByText("55%")).toBeInTheDocument();
-    expect(screen.getByText("25%")).toBeInTheDocument();
-    expect(screen.getByText("20%")).toBeInTheDocument();
+    // scope to each outcome cell — the confidence badge also shows 55%
+    expect(
+      within(screen.getByText("Home").parentElement as HTMLElement).getByText("55%")
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByText("Draw").parentElement as HTMLElement).getByText("25%")
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByText("Away").parentElement as HTMLElement).getByText("20%")
+    ).toBeInTheDocument();
   });
 
   it("shows predicted score", () => {
