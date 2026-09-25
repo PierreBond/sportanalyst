@@ -7,7 +7,6 @@ import type {
   ModelsResponse,
 } from "@/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8014";
 const INTERNAL_API_BASE = "/api/backend";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY;
 
@@ -117,11 +116,15 @@ export async function getModels(): Promise<ModelsResponse> {
 }
 
 export function getWebSocketUrl(matchId: string): string {
-  const wsBase = API_BASE.replace(/^http/, "ws");
-  if (!API_KEY) {
-    return `${wsBase}/ws/live/${matchId}`;
-  }
-
-  const apiKeyParam = encodeURIComponent(API_KEY);
-  return `${wsBase}/ws/live/${matchId}?api_key=${apiKeyParam}`;
+  // WS bypasses the Next.js HTTP proxy (route handlers can't upgrade), so it
+  // hits the backend's published port directly, using the page's own hostname
+  // (NEXT_PUBLIC_API_URL is Docker-internal `backend`, unresolvable in browser).
+  // Override with NEXT_PUBLIC_WS_URL for TLS-terminated deployments (wss).
+  const wsBase =
+    process.env.NEXT_PUBLIC_WS_URL ||
+    (typeof window !== "undefined"
+      ? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8005`
+      : "ws://127.0.0.1:8005");
+  const apiKeyParam = API_KEY ? `?api_key=${encodeURIComponent(API_KEY)}` : "";
+  return `${wsBase}/ws/live/${matchId}${apiKeyParam}`;
 }
