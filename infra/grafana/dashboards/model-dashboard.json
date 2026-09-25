@@ -289,7 +289,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "brier_score_trailing_100",
+          "expr": "brier_score",
           "legendFormat": "Brier Score",
           "refId": "A"
         }

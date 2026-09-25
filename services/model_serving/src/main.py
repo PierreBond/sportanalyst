@@ -169,6 +169,7 @@ _team_to_idx: dict[str, int] = {}
 _league_to_idx: dict[str, int] = {}
 _known_team_names: set[str] = set()
 _team_elos: dict[str, float] = {}
+_model_brier_score: float | None = None
 
 
 async def get_optional_db() -> AsyncGenerator[AsyncSession | None, None]:
@@ -262,7 +263,7 @@ async def lifespan(app: FastAPI):
 
     _betting_engine = BettingEngine()
 
-    global _team_to_idx, _league_to_idx, _known_team_names, _team_elos
+    global _team_to_idx, _league_to_idx, _known_team_names, _team_elos, _model_brier_score
 
     _predictor = ModelPredictor()
     _predictor.load_model()
@@ -289,6 +290,7 @@ async def lifespan(app: FastAPI):
             _league_to_idx = {name: i for i, name in enumerate(meta.get("league_classes", []))}
             _known_team_names = set(_team_to_idx.keys())
             _team_elos = {name: float(v) for name, v in meta.get("team_elos", {}).items()}
+            _model_brier_score = float(meta["brier_score"]) if meta.get("brier_score") is not None else None
             logger.info("feature_metadata_loaded", teams=len(_team_to_idx), leagues=len(_league_to_idx), elos=len(_team_elos))
         except Exception as e:
             logger.warning("feature_metadata_load_failed", error=str(e))
@@ -448,7 +450,7 @@ def _build_prediction_payload(
             "away": round(away_win_prob * PREDICTED_AWAY_SCORE_MULTIPLIER, 2),
         },
         "calibrated": calibrated,
-        "brier_score_trailing_100": 0.18,
+        "brier_score": _model_brier_score,
         "confidence": _classify_confidence(max_prob),
         "value_bets": [],
         "shap_explanation": shap_explanation or {

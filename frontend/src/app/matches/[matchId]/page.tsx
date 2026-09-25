@@ -165,7 +165,7 @@ export default function MatchDetailPage() {
                 {prediction.away_team}
               </div>
               <p className="text-center text-gray-500 mt-2">
-                Brier Score (trailing 100): {prediction.brier_score_trailing_100.toFixed(3)}
+                Brier Score (held-out): {prediction.brier_score?.toFixed(3) ?? "—"}
               </p>
             </div>
           </div>

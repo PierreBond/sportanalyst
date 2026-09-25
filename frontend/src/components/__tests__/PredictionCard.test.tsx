@@ -21,7 +21,7 @@ describe("PredictionCard", () => {
       away: 1.2,
     },
     calibrated: true,
-    brier_score_trailing_100: 0.187,
+    brier_score: 0.2079,
     value_bets: [],
     shap_explanation: {
       positive_drivers: [],

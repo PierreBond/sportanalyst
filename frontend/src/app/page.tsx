@@ -117,10 +117,15 @@ export default function HomePage() {
             Model Confidence
           </h3>
           <p className="text-sm text-gray-700">
-            When confident (&gt;55%), accuracy: <span className="font-bold text-green-600">65-86%</span>
+            When confident (&gt;55%), accuracy:{" "}
+            <span className="font-bold text-green-600">~47%</span>
           </p>
           <p className="text-sm text-gray-500 mt-1">
-            Overall: 49% across 2,844 test matches
+            {modelInfo
+              ? `Held-out test: ${(modelInfo.accuracy * 100).toFixed(1)}% across ${modelInfo.n_matches} matches`
+              : "Held-out test accuracy unavailable"}
+            <br />
+            2026 walk-forward (n=109 confident matches)
           </p>
         </div>
       </div>

@@ -142,7 +142,7 @@ async def test_prediction_response_schema(client):
         "probabilities",
         "predicted_score",
         "calibrated",
-        "brier_score_trailing_100",
+        "brier_score",
         "value_bets",
         "shap_explanation",
         "generated_at",

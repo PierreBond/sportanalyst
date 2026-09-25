@@ -16,7 +16,7 @@ export interface PredictionResponse {
     away: number;
   };
   calibrated: boolean;
-  brier_score_trailing_100: number;
+  brier_score: number | null;
   value_bets: ValueBet[];
   shap_explanation: SHAPExplanation;
   generated_at: string;
