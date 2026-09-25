@@ -529,7 +529,8 @@ SQL_ROLLING = """
         WHERE (home_team_id = :tid OR away_team_id = :tid)
           AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
     )
-    SELECT AVG(scored) AS avg_scored, AVG(conceded) AS avg_conceded, AVG(points) AS avg_points
+    SELECT AVG(scored) AS avg_scored, AVG(conceded) AS avg_conceded, AVG(points) AS avg_points,
+           AVG(CASE WHEN scored = conceded THEN 1.0 ELSE 0.0 END) AS avg_draws
     FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
 """
 
@@ -558,6 +559,12 @@ SQL_LEAGUE_AVG = """
     WHERE league = :league AND status = 'FT' AND home_score IS NOT NULL
 """
 
+# leakage-safe: only matches before this fixture (mirrors training's expanding shifted mean)
+SQL_LEAGUE_DRAW = """
+    SELECT AVG(CASE WHEN home_score = away_score THEN 1.0 ELSE 0.0 END) AS draw_rate FROM matches
+    WHERE league = :league AND status = 'FT' AND home_score IS NOT NULL AND scheduled_at < :md
+"""
+
 SQL_H2H = """
     WITH h2h AS (
         SELECT home_score, away_score, home_team_id, away_team_id, scheduled_at
@@ -574,15 +581,18 @@ SQL_H2H = """
             WHEN (home_team_id = :htid AND home_score > away_score)
               OR (away_team_id = :htid AND away_score > home_score) THEN 1.0
             WHEN home_score = away_score THEN 0.5
-            ELSE 0.0 END) AS h_win_rate
+            ELSE 0.0 END) AS h_win_rate,
+        AVG(CASE WHEN home_score = away_score THEN 1.0 ELSE 0.0 END) AS h_draw_rate
     FROM h2h
 """
 
 async def _team_rolling(team_id, match_date, db, sql, w=5):
     r = (await db.execute(text(sql), {"tid": team_id, "md": match_date, "w": w})).mappings().first()
     if r and r["avg_scored"] is not None:
-        return float(r["avg_scored"]), float(r["avg_conceded"]), float(r["avg_points"])
-    return 0.0, 0.0, 0.0
+        # avg_draws only exists in SQL_ROLLING; side-specific SQLs don't select it
+        draws = r["avg_draws"] if "avg_draws" in r.keys() and r["avg_draws"] is not None else 0.0
+        return float(r["avg_scored"]), float(r["avg_conceded"]), float(r["avg_points"]), float(draws)
+    return 0.0, 0.0, 0.0, 0.0
 
 async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> dict[str, float]:
     f = {k: 0.0 for k in [
@@ -595,11 +605,12 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
         "away_gf_avg_last10", "away_ga_avg_last10", "away_form_last10",
         "home_h_gf_avg_last5", "home_h_ga_avg_last5", "home_h_form_last5",
         "away_a_gf_avg_last5", "away_a_ga_avg_last5", "away_a_form_last5",
-        "home_days_rest", "away_days_rest", "league_avg_total_goals",
-        "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins", "season",
+        "home_days_rest", "away_days_rest", "league_avg_total_goals", "league_draw_rate",
+        "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins", "h2h_draw_rate", "season",
         "home_elo", "away_elo", "elo_diff",
         "home_odds", "draw_odds", "away_odds",
         "home_implied_prob", "draw_implied_prob", "away_implied_prob",
+        "home_draw_rate_last10", "away_draw_rate_last10",
     ]}
     if db is None:
         return f
@@ -639,21 +650,23 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
 
         # rolling all-games: windows 3, 5, 10
         for w in [3, 5, 10]:
-            h_gf, h_ga, h_pt = await _team_rolling(home_tid, match_date, db, SQL_ROLLING, w)
-            a_gf, a_ga, a_pt = await _team_rolling(away_tid, match_date, db, SQL_ROLLING, w)
+            h_gf, h_ga, h_pt, h_dr = await _team_rolling(home_tid, match_date, db, SQL_ROLLING, w)
+            a_gf, a_ga, a_pt, a_dr = await _team_rolling(away_tid, match_date, db, SQL_ROLLING, w)
             f[f"home_gf_avg_last{w}"] = h_gf
             f[f"home_ga_avg_last{w}"] = h_ga
             f[f"home_form_last{w}"] = h_pt
+            f[f"home_draw_rate_last{w}"] = h_dr
             f[f"away_gf_avg_last{w}"] = a_gf
             f[f"away_ga_avg_last{w}"] = a_ga
             f[f"away_form_last{w}"] = a_pt
+            f[f"away_draw_rate_last{w}"] = a_dr
 
         # home/away specific rolling
-        h_h_gf, h_h_ga, h_h_pt = await _team_rolling(home_tid, match_date, db, SQL_ROLLING_SIDE, 5)
+        h_h_gf, h_h_ga, h_h_pt, _ = await _team_rolling(home_tid, match_date, db, SQL_ROLLING_SIDE, 5)
         f["home_h_gf_avg_last5"] = h_h_gf
         f["home_h_ga_avg_last5"] = h_h_ga
         f["home_h_form_last5"] = h_h_pt
-        a_a_gf, a_a_ga, a_a_pt = await _team_rolling(away_tid, match_date, db, SQL_ROLLING_SIDE_AWAY, 5)
+        a_a_gf, a_a_ga, a_a_pt, _ = await _team_rolling(away_tid, match_date, db, SQL_ROLLING_SIDE_AWAY, 5)
         f["away_a_gf_avg_last5"] = a_a_gf
         f["away_a_ga_avg_last5"] = a_a_ga
         f["away_a_form_last5"] = a_a_pt
@@ -675,6 +688,8 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
         # league context
         lr = (await db.execute(text(SQL_LEAGUE_AVG), {"league": league})).mappings().first()
         f["league_avg_total_goals"] = float(lr["avg_total"]) if lr and lr["avg_total"] else 2.5
+        ld = (await db.execute(text(SQL_LEAGUE_DRAW), {"league": league, "md": match_date})).mappings().first()
+        f["league_draw_rate"] = float(ld["draw_rate"]) if ld and ld["draw_rate"] is not None else 0.26
 
         # h2h
         hr = (await db.execute(text(SQL_H2H), {"htid": home_tid, "atid": away_tid, "md": match_date})).mappings().first()
@@ -682,8 +697,10 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
             f["h2h_home_gf_avg"] = float(hr["h_gf"])
             f["h2h_away_gf_avg"] = float(hr["h_conceded"])
             f["h2h_home_wins"] = float(hr["h_win_rate"])
+            f["h2h_draw_rate"] = float(hr["h_draw_rate"]) if hr["h_draw_rate"] is not None else 0.26
         else:
             f["h2h_home_wins"] = 0.5
+            f["h2h_draw_rate"] = 0.26
 
         # odds features: latest snapshot, implied probs de-vigged (matches training)
         odd = (await db.execute(text("""
@@ -809,9 +826,13 @@ async def _generate_prediction(
                 "home_days_rest": "Home team rest days",
                 "away_days_rest": "Away team rest days",
                 "league_avg_total_goals": "League average goals",
+                "league_draw_rate": "League draw rate",
                 "h2h_home_gf_avg": "H2H home goals avg",
                 "h2h_away_gf_avg": "H2H away goals avg",
                 "h2h_home_wins": "H2H home win rate",
+                "h2h_draw_rate": "H2H draw rate",
+                "home_draw_rate_last10": "Home draw rate (last 10)",
+                "away_draw_rate_last10": "Away draw rate (last 10)",
                 "home_team_encoded": "Home team strength",
                 "away_team_encoded": "Away team strength",
                 "league_encoded": "League context",

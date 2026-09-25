@@ -109,7 +109,18 @@ class ModelPredictor:
 
                         self._model = joblib.load(model_path)
                         self._is_loaded = True
-                        self._model_version = os.getenv("MODEL_VERSION", "local-artifact")
+                        # report the trained version from predictor_metadata.json when present
+                        version = os.getenv("MODEL_VERSION")
+                        if not version:
+                            meta_path = model_path.parent / "predictor_metadata.json"
+                            if meta_path.exists():
+                                try:
+                                    import json
+
+                                    version = json.loads(meta_path.read_text()).get("model_version")
+                                except Exception:
+                                    version = None
+                        self._model_version = version or "local-artifact"
                         logger.info(
                             "model_loaded_from_joblib",
                             model_name=self._model_name,

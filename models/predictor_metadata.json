@@ -21,6 +21,8 @@
     "away_gf_avg_last10",
     "away_ga_avg_last10",
     "away_form_last10",
+    "home_draw_rate_last10",
+    "away_draw_rate_last10",
     "home_h_gf_avg_last5",
     "home_h_ga_avg_last5",
     "home_h_form_last5",
@@ -30,9 +32,11 @@
     "home_days_rest",
     "away_days_rest",
     "league_avg_total_goals",
+    "league_draw_rate",
     "h2h_home_gf_avg",
     "h2h_away_gf_avg",
     "h2h_home_wins",
+    "h2h_draw_rate",
     "season",
     "home_elo",
     "away_elo",
@@ -724,11 +728,15 @@
     "Yokohama FC": 1430.449435902143,
     "York Region Shooters": 1509.5049431892326
   },
-  "accuracy": 0.4338,
-  "brier_score": 0.2145,
-  "accuracy_xgb": 0.4501,
+  "accuracy": 0.4664,
+  "brier_score": 0.2142,
+  "accuracy_blend_reference": 0.442,
   "accuracy_poisson": 0.4277,
-  "trained_at": "2026-09-25T18:17:44.430016+00:00",
+  "blend_sweep_best": {
+    "weight_xgb": 0.7,
+    "accuracy": 0.4705
+  },
+  "trained_at": "2026-09-25T20:16:09.564320+00:00",
   "train_date_range": [
     "2022-02-18",
     "2026-09-19"
@@ -740,7 +748,7 @@
   ],
   "test_season": "2026",
   "n_matches": 9029,
-  "n_features": 43,
+  "n_features": 47,
   "best_xgb_params": {
     "n_estimators": 400,
     "max_depth": 4,
@@ -750,6 +758,6 @@
     "random_state": 42,
     "eval_metric": "mlogloss"
   },
-  "model_type": "ensemble_xgb_poisson",
-  "model_version": "v3.2_more_data"
+  "model_type": "xgboost",
+  "model_version": "v3.3_draw_features"
 }

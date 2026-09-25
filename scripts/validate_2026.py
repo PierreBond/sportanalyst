@@ -42,13 +42,15 @@ for m in finished:
 
 print(f"  Updated {updated} matches to FT status")
 
-# Load 2026 FT matches from DB
+# Load ALL FT matches — rolling/h2h/elo/league features need full history
+# (2026-only rows would leave early-season matches with zero history);
+# evaluation is restricted to the 2026 season after feature build.
 df = pd.read_sql("""
     SELECT m.match_id::text, m.scheduled_at, m.home_score, m.away_score,
            ht.name AS home_team, at.name AS away_team, m.league, m.season,
            m.home_team_id, m.away_team_id
     FROM matches m JOIN teams ht ON m.home_team_id=ht.team_id JOIN teams at ON m.away_team_id=at.team_id
-    WHERE m.status='FT' AND m.scheduled_at >= '2026-01-01'
+    WHERE m.status='FT' AND m.home_score IS NOT NULL
     ORDER BY m.scheduled_at
 """, engine)
 # same odds join as train_model.py: latest snapshot per match
@@ -68,7 +70,7 @@ denom = inv["h"] + inv["d"] + inv["a"]
 df["home_implied_prob"] = np.where(denom > 0, inv["h"] / denom, 0.0)
 df["draw_implied_prob"] = np.where(denom > 0, inv["d"] / denom, 0.0)
 df["away_implied_prob"] = np.where(denom > 0, inv["a"] / denom, 0.0)
-print(f"Loaded {len(df)} 2026 FT matches from DB ({(df['home_odds'] > 0).sum()} with odds)")
+print(f"Loaded {len(df)} FT matches from DB ({(df['home_odds'] > 0).sum()} with odds)")
 
 # Feature engineering
 def team_games_df(df):
@@ -78,15 +80,16 @@ def team_games_df(df):
     away.columns = ["match_id","scheduled_at","team_id","scored","conceded"]
     all_g = pd.concat([home,away]).sort_values("scheduled_at").reset_index(drop=True)
     all_g["pts"] = (all_g["scored"]>all_g["conceded"]).astype(float)*3 + (all_g["scored"]==all_g["conceded"]).astype(float)
+    all_g["is_draw"] = (all_g["scored"]==all_g["conceded"]).astype(float)
     return all_g
 
 def add_rolling(all_g, df, prefix, window, game_side=None):
     g = all_g.copy()
     if game_side: g = g[g["game_side"]==game_side]
-    for col, name in [("scored","gf_avg"),("conceded","ga_avg"),("pts","form")]:
+    for col, name in [("scored","gf_avg"),("conceded","ga_avg"),("pts","form"),("is_draw","draw_rate")]:
         g[f"{name}_{window}"] = g.groupby("team_id")[col].transform(lambda x: x.shift(1).rolling(window, min_periods=1).mean())
     col_map = g.groupby("match_id").first().add_prefix(f"{prefix}_")
-    for suffix in ["gf_avg","ga_avg","form"]:
+    for suffix in ["gf_avg","ga_avg","form","draw_rate"]:
         df[f"{prefix}_{suffix}_last{window}"] = df["match_id"].map(col_map[f"{prefix}_{suffix}_{window}"]).fillna(0)
     return df
 
@@ -109,6 +112,9 @@ for side, tid_col in [("home","home_team_id"),("away","away_team_id")]:
 league_stats = df.groupby("league")["home_score"].agg(["count","sum"]).join(df.groupby("league")["away_score"].agg("sum"))
 league_stats["avg_total_goals"] = (league_stats["sum"]+league_stats["away_score"])/league_stats["count"].replace(0,np.nan)
 df["league_avg_total_goals"] = df["league"].map(league_stats["avg_total_goals"].to_dict()).fillna(2.5)
+df["_is_draw"] = (df["home_score"]==df["away_score"]).astype(float)
+df["league_draw_rate"] = df.groupby("league")["_is_draw"].transform(lambda x: x.shift(1).expanding().mean()).fillna(0.26)
+df = df.drop(columns=["_is_draw"])
 h2h_rows = []
 for _, row in df.iterrows():
     h2h = df[((df["home_team_id"]==row["home_team_id"])&(df["away_team_id"]==row["away_team_id"])|
@@ -117,9 +123,11 @@ for _, row in df.iterrows():
     if len(h2h)>0:
         hg = h2h.apply(lambda r: r["home_score"] if r["home_team_id"]==row["home_team_id"] else r["away_score"], axis=1)
         ag = h2h.apply(lambda r: r["away_score"] if r["home_team_id"]==row["home_team_id"] else r["home_score"], axis=1)
-        h2h_rows.append({"match_id":row["match_id"],"h2h_home_gf_avg":hg.mean(),"h2h_away_gf_avg":ag.mean(),"h2h_home_wins":(hg>ag).mean()})
+        h2h_rows.append({"match_id":row["match_id"],"h2h_home_gf_avg":hg.mean(),"h2h_away_gf_avg":ag.mean(),
+                         "h2h_home_wins":(hg>ag).mean(),"h2h_draw_rate":(hg==ag).mean()})
     else:
-        h2h_rows.append({"match_id":row["match_id"],"h2h_home_gf_avg":0,"h2h_away_gf_avg":0,"h2h_home_wins":0.5})
+        h2h_rows.append({"match_id":row["match_id"],"h2h_home_gf_avg":0,"h2h_away_gf_avg":0,
+                         "h2h_home_wins":0.5,"h2h_draw_rate":0.26})
 h2h_df = pd.DataFrame(h2h_rows).set_index("match_id")
 for c in h2h_df.columns: df[c] = df["match_id"].map(h2h_df[c]).fillna(0)
 elo, elo_rows = {}, []
@@ -136,28 +144,18 @@ for c in elo_df.columns: df[c] = df["match_id"].map(elo_df[c]).fillna(0)
 df["target"] = df.apply(lambda r: 0 if r["home_score"]>r["away_score"] else (1 if r["home_score"]==r["away_score"] else 2), axis=1)
 df = df.dropna(subset=["target"])
 
-print(f"Features built: {len(df)} matches")
+# features were built over full history; score only the 2026 season
+df = df[df["scheduled_at"] >= pd.Timestamp("2026-01-01", tz="UTC")].reset_index(drop=True)
+
+print(f"Features built: {len(df)} matches (evaluated on 2026 season)")
 
 # Encode using saved model
 meta = json.load(open(MODEL_DIR/"predictor_metadata.json"))
 team_classes, league_classes = meta["team_classes"], meta["league_classes"]
 le_team = LabelEncoder(); le_team.classes_ = np.array(team_classes)
 le_league = LabelEncoder(); le_league.classes_ = np.array(league_classes)
-FEATURES = [
-    "home_team_encoded","away_team_encoded","league_encoded",
-    "home_gf_avg_last3","home_ga_avg_last3","home_form_last3",
-    "home_gf_avg_last5","home_ga_avg_last5","home_form_last5",
-    "home_gf_avg_last10","home_ga_avg_last10","home_form_last10",
-    "away_gf_avg_last3","away_ga_avg_last3","away_form_last3",
-    "away_gf_avg_last5","away_ga_avg_last5","away_form_last5",
-    "away_gf_avg_last10","away_ga_avg_last10","away_form_last10",
-    "home_h_gf_avg_last5","home_h_ga_avg_last5","home_h_form_last5",
-    "away_a_gf_avg_last5","away_a_ga_avg_last5","away_a_form_last5",
-    "home_days_rest","away_days_rest","league_avg_total_goals",
-    "h2h_home_gf_avg","h2h_away_gf_avg","h2h_home_wins","season",
-    "home_elo","away_elo","elo_diff",
-    "home_odds","draw_odds","away_odds","home_implied_prob","draw_implied_prob","away_implied_prob",
-]
+# Always evaluate exactly what the saved model expects
+FEATURES = meta["feature_names"]
 df["home_team_enc"] = df["home_team"].map(lambda x: le_team.transform([x])[0] if x in team_classes else 0)
 df["away_team_enc"] = df["away_team"].map(lambda x: le_team.transform([x])[0] if x in team_classes else 0)
 df["league_enc"] = df["league"].map(lambda x: le_league.transform([x])[0] if x in league_classes else 0)

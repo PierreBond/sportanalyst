@@ -39,17 +39,18 @@ def team_games_df(df):
     all_g = pd.concat([home, away]).sort_values("scheduled_at").reset_index(drop=True)
     all_g["pts"] = (all_g["scored"] > all_g["conceded"]).astype(float) * 3
     all_g["pts"] += (all_g["scored"] == all_g["conceded"]).astype(float)
+    all_g["is_draw"] = (all_g["scored"] == all_g["conceded"]).astype(float)
     return all_g
 
 def add_rolling(all_g, df, prefix, window, game_side=None):
     g = all_g.copy()
     if game_side:
         g = g[g["game_side"] == game_side] if "game_side" in g.columns else g
-    for col, name in [("scored", "gf_avg"), ("conceded", "ga_avg"), ("pts", "form")]:
+    for col, name in [("scored", "gf_avg"), ("conceded", "ga_avg"), ("pts", "form"), ("is_draw", "draw_rate")]:
         g[f"{name}_{window}"] = g.groupby("team_id")[col].transform(
             lambda x: x.shift(1).rolling(window, min_periods=1).mean())
     col_map = g.groupby("match_id").first().add_prefix(f"{prefix}_")
-    for suffix in ["gf_avg", "ga_avg", "form"]:
+    for suffix in ["gf_avg", "ga_avg", "form", "draw_rate"]:
         src = f"{prefix}_{suffix}_{window}"
         dst = f"{prefix}_{suffix}_last{window}"
         df[dst] = df["match_id"].map(col_map[src]).fillna(0)
@@ -76,6 +77,11 @@ def engineer_features(df):
         df.groupby("league")["away_score"].agg("sum"))
     league_stats["avg_total_goals"] = (league_stats["sum"] + league_stats["away_score"]) / league_stats["count"]
     df["league_avg_total_goals"] = df["league"].map(league_stats["avg_total_goals"].to_dict()).fillna(2.5)
+    # leakage-safe league draw rate: expanding mean of past matches only
+    df["_is_draw"] = (df["home_score"] == df["away_score"]).astype(float)
+    df["league_draw_rate"] = df.groupby("league")["_is_draw"].transform(
+        lambda x: x.shift(1).expanding().mean()).fillna(0.26)
+    df = df.drop(columns=["_is_draw"])
     h2h_rows = []
     for _, row in df.iterrows():
         h2h = df[((df["home_team_id"] == row["home_team_id"]) & (df["away_team_id"] == row["away_team_id"]) |
@@ -84,9 +90,11 @@ def engineer_features(df):
         if len(h2h) > 0:
             hg = h2h.apply(lambda r: r["home_score"] if r["home_team_id"] == row["home_team_id"] else r["away_score"], axis=1)
             ag = h2h.apply(lambda r: r["away_score"] if r["home_team_id"] == row["home_team_id"] else r["home_score"], axis=1)
-            h2h_rows.append({"match_id": row["match_id"], "h2h_home_gf_avg": hg.mean(), "h2h_away_gf_avg": ag.mean(), "h2h_home_wins": (hg > ag).mean()})
+            h2h_rows.append({"match_id": row["match_id"], "h2h_home_gf_avg": hg.mean(), "h2h_away_gf_avg": ag.mean(),
+                             "h2h_home_wins": (hg > ag).mean(), "h2h_draw_rate": (hg == ag).mean()})
         else:
-            h2h_rows.append({"match_id": row["match_id"], "h2h_home_gf_avg": 0, "h2h_away_gf_avg": 0, "h2h_home_wins": 0.5})
+            h2h_rows.append({"match_id": row["match_id"], "h2h_home_gf_avg": 0, "h2h_away_gf_avg": 0,
+                             "h2h_home_wins": 0.5, "h2h_draw_rate": 0.26})
     h2h_df = pd.DataFrame(h2h_rows).set_index("match_id")
     for c in h2h_df.columns:
         df[c] = df["match_id"].map(h2h_df[c]).fillna(0)
@@ -115,10 +123,11 @@ FEATURES = [
     "away_gf_avg_last3", "away_ga_avg_last3", "away_form_last3",
     "away_gf_avg_last5", "away_ga_avg_last5", "away_form_last5",
     "away_gf_avg_last10", "away_ga_avg_last10", "away_form_last10",
+    "home_draw_rate_last10", "away_draw_rate_last10",
     "home_h_gf_avg_last5", "home_h_ga_avg_last5", "home_h_form_last5",
     "away_a_gf_avg_last5", "away_a_ga_avg_last5", "away_a_form_last5",
-    "home_days_rest", "away_days_rest", "league_avg_total_goals",
-    "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins",
+    "home_days_rest", "away_days_rest", "league_avg_total_goals", "league_draw_rate",
+    "h2h_home_gf_avg", "h2h_away_gf_avg", "h2h_home_wins", "h2h_draw_rate",
     "season", "home_elo", "away_elo", "elo_diff",
     "home_odds", "draw_odds", "away_odds",
     "home_implied_prob", "draw_implied_prob", "away_implied_prob",
@@ -243,23 +252,29 @@ def main():
     lambda_a = poisson_away.predict(X_test)
     y_prob_poisson = np.array([poisson_probs(lh, la) for lh, la in zip(lambda_h, lambda_a)])
 
-    # === Ensemble (simple average) ===
-    print("\n=== Ensemble ===")
-    y_prob = (y_prob_xgb + y_prob_poisson) / 2
-    y_pred = y_prob.argmax(axis=1)
+    # === Evaluation ===
+    # Production serves predictor.joblib = pure XGBoost; report that as headline.
+    y_pred = y_prob_xgb.argmax(axis=1)
     acc = (y_pred == y_test).mean()
-    print(f"Test accuracy: {acc:.4f}")
+    print(f"\nTest accuracy (served model): {acc:.4f}")
     print(classification_report(y_test, y_pred, target_names=["home_win", "draw", "away_win"]))
-    brier_avg = np.mean([brier_score_loss((y_test == i).astype(int), y_prob[:, i]) for i in range(3)])
+    brier_avg = np.mean([brier_score_loss((y_test == i).astype(int), y_prob_xgb[:, i]) for i in range(3)])
     print(f"Brier avg: {brier_avg:.4f}")
 
-    y_prob_xgb_only = model_xgb.predict_proba(X_test)
-    acc_xgb = (y_prob_xgb_only.argmax(axis=1) == y_test).mean()
-    poisson_preds = y_prob_poisson.argmax(axis=1)
-    acc_poisson = (poisson_preds == y_test).mean()
-    print(f"  XGBoost alone: {acc_xgb:.4f}")
+    # reference: 50/50 blend (not served) + weight sweep for information
+    y_prob_blend = (y_prob_xgb + y_prob_poisson) / 2
+    acc_blend = (y_prob_blend.argmax(axis=1) == y_test).mean()
+    acc_poisson = (y_prob_poisson.argmax(axis=1) == y_test).mean()
+    print(f"  XGBoost alone: {acc:.4f}")
     print(f"  Poisson alone: {acc_poisson:.4f}")
-    print(f"  Ensemble:      {acc:.4f}")
+    print(f"  Blend 0.5:     {acc_blend:.4f}")
+    print("  Blend sweep (weight on XGBoost):")
+    best_w, best_w_acc = 1.0, acc
+    for w in [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]:
+        w_acc = ((w * y_prob_xgb + (1 - w) * y_prob_poisson).argmax(axis=1) == y_test).mean()
+        print(f"    w={w:.2f}: acc={w_acc:.4f}")
+        if w_acc > best_w_acc:
+            best_w, best_w_acc = w, w_acc
 
     imp = pd.DataFrame({"feature": FEATURES, "importance": model_xgb.feature_importances_}).sort_values("importance", ascending=False)
     print("\nTop 10 features (XGBoost):")
@@ -274,8 +289,9 @@ def main():
         "team_elos": {name: team_elos.get(name, 1500) for name in le_team.classes_},
         "accuracy": float(round(acc, 4)),
         "brier_score": float(round(brier_avg, 4)),
-        "accuracy_xgb": float(round(acc_xgb, 4)),
+        "accuracy_blend_reference": float(round(acc_blend, 4)),
         "accuracy_poisson": float(round(acc_poisson, 4)),
+        "blend_sweep_best": {"weight_xgb": float(best_w), "accuracy": float(round(best_w_acc, 4))},
         "trained_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "train_date_range": [str(train_dt.date()), str(test_dt.date())],
         "train_seasons": train_seasons,
@@ -283,8 +299,8 @@ def main():
         "n_matches": len(df),
         "n_features": len(X.columns),
         "best_xgb_params": {k: v if not isinstance(v, (np.integer, np.floating)) else int(v) if isinstance(v, np.integer) else float(v) for k, v in best_params.items()},
-        "model_type": "ensemble_xgb_poisson",
-        "model_version": "v3.2_more_data",
+        "model_type": "xgboost",
+        "model_version": "v3.3_draw_features",
     }
 
     model_path = MODEL_DIR / "predictor.joblib"

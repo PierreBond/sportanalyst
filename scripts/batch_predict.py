@@ -27,11 +27,12 @@ def build_features(match_row, team_idx, league_idx, elos, db):
         "away_gf_avg_last10","away_ga_avg_last10","away_form_last10",
         "home_h_gf_avg_last5","home_h_ga_avg_last5","home_h_form_last5",
         "away_a_gf_avg_last5","away_a_ga_avg_last5","away_a_form_last5",
-        "home_days_rest","away_days_rest","league_avg_total_goals",
-        "h2h_home_gf_avg","h2h_away_gf_avg","h2h_home_wins","season",
+        "home_days_rest","away_days_rest","league_avg_total_goals","league_draw_rate",
+        "h2h_home_gf_avg","h2h_away_gf_avg","h2h_home_wins","h2h_draw_rate","season",
         "home_elo","away_elo","elo_diff",
         "home_odds","draw_odds","away_odds",
         "home_implied_prob","draw_implied_prob","away_implied_prob",
+        "home_draw_rate_last10","away_draw_rate_last10",
     ]}
     known = set(team_idx.keys())
     h_name = resolve_team_name(home, known)
@@ -58,7 +59,9 @@ def build_features(match_row, team_idx, league_idx, elos, db):
                 CASE WHEN (home_team_id=:tid AND home_score>away_score) OR (away_team_id=:tid AND away_score>home_score) THEN 3.0
                      WHEN home_score=away_score THEN 1.0 ELSE 0.0 END AS points
             FROM matches WHERE (home_team_id=:tid OR away_team_id=:tid) AND scheduled_at<:md AND status='FT' AND home_score IS NOT NULL
-        ) SELECT AVG(scored), AVG(conceded), AVG(points) FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
+        ) SELECT AVG(scored), AVG(conceded), AVG(points),
+                 AVG(CASE WHEN scored=conceded THEN 1.0 ELSE 0.0 END)
+          FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
     """
     sql_home = """
         WITH g AS (
@@ -75,6 +78,7 @@ def build_features(match_row, team_idx, league_idx, elos, db):
         ) SELECT AVG(scored), AVG(conceded), AVG(points) FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
     """
     sql_league_avg = "SELECT AVG(home_score+away_score) FROM matches WHERE league=:league AND status='FT' AND home_score IS NOT NULL"
+    sql_league_draw = "SELECT AVG(CASE WHEN home_score=away_score THEN 1.0 ELSE 0.0 END) FROM matches WHERE league=:league AND status='FT' AND home_score IS NOT NULL AND scheduled_at<:md"
     sql_h2h = """
         WITH h2h AS (
             SELECT home_score, away_score, home_team_id, away_team_id FROM matches
@@ -82,7 +86,8 @@ def build_features(match_row, team_idx, league_idx, elos, db):
             AND scheduled_at<:md AND status='FT' AND home_score IS NOT NULL ORDER BY scheduled_at DESC LIMIT 5
         ) SELECT AVG(CASE WHEN home_team_id=:htid2 THEN home_score ELSE away_score END) AS h_gf,
                  AVG(CASE WHEN away_team_id=:htid2 THEN away_score ELSE home_score END) AS h_conceded,
-                 AVG(CASE WHEN (home_team_id=:htid2 AND home_score>away_score) OR (away_team_id=:htid2 AND away_score>home_score) THEN 1.0 WHEN home_score=away_score THEN 0.5 ELSE 0.0 END)
+                 AVG(CASE WHEN (home_team_id=:htid2 AND home_score>away_score) OR (away_team_id=:htid2 AND away_score>home_score) THEN 1.0 WHEN home_score=away_score THEN 0.5 ELSE 0.0 END),
+                 AVG(CASE WHEN home_score=away_score THEN 1.0 ELSE 0.0 END)
         FROM h2h
     """
     sql_last_match = """
@@ -98,6 +103,8 @@ def build_features(match_row, team_idx, league_idx, elos, db):
                     f[f"{side}_gf_avg_last{w}"] = float(r[0])
                     f[f"{side}_ga_avg_last{w}"] = float(r[1])
                     f[f"{side}_form_last{w}"] = float(r[2])
+                    if r[3] is not None:
+                        f[f"{side}_draw_rate_last{w}"] = float(r[3])
 
         for side, tid in [("home", home_tid), ("away", away_tid)]:
             sql_s = sql_home if side == "home" else sql_away
@@ -118,14 +125,19 @@ def build_features(match_row, team_idx, league_idx, elos, db):
         lr = conn2.execute(text(sql_league_avg), {"league": league}).fetchone()
         if lr and lr[0]:
             f["league_avg_total_goals"] = float(lr[0])
+        ld = conn2.execute(text(sql_league_draw), {"league": league, "md": md}).fetchone()
+        if ld and ld[0] is not None:
+            f["league_draw_rate"] = float(ld[0])
 
         hr = conn2.execute(text(sql_h2h), {"htid": home_tid, "atid": away_tid, "md": md, "htid2": home_tid}).fetchone()
         if hr and hr[0] is not None:
             f["h2h_home_gf_avg"] = float(hr[0])
             f["h2h_away_gf_avg"] = float(hr[1])
             f["h2h_home_wins"] = float(hr[2])
+            f["h2h_draw_rate"] = float(hr[3]) if hr[3] is not None else 0.26
         else:
             f["h2h_home_wins"] = 0.5
+            f["h2h_draw_rate"] = 0.26
 
         # ponytail: odds features from the-odds-api
         odd = conn2.execute(text("""
@@ -184,7 +196,7 @@ def main():
             conn.execute(text("""
                 INSERT INTO predictions (prediction_id, match_id, model_name, model_version,
                     predicted_at, home_win_prob, draw_prob, away_win_prob, is_live, created_at)
-                VALUES (:pid,:mid,'ensemble_xgb_poisson',:mv,:now,:h,:d,:a,false,:now)
+                VALUES (:pid,:mid,'xgboost',:mv,:now,:h,:d,:a,false,:now)
                 ON CONFLICT DO NOTHING
             """), {"pid": uuid4(), "mv": MODEL_VERSION, "mid": mid, "now": now_dt,
                    "h": round(float(probs[0]), 4), "d": round(float(probs[1]), 4),
