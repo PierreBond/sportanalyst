@@ -56,6 +56,11 @@ export function MarketsPanel({ markets }: { markets: MarketsResponse }) {
           </span>
         ))}
       </div>
+
+      <p className="mt-4 pt-3 border-t border-gray-100 text-xs text-gray-400">
+        Backtested (513 matches, 2026): totals and BTTS accuracy ≈ league base
+        rates — treat as goal-model analytics, not a betting edge.
+      </p>
     </div>
   );
 }
