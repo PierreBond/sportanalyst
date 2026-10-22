@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND_BASE = process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8005";
 const BACKEND_API_KEY = process.env.BACKEND_API_KEY || process.env.API_KEY;
-const PROXY_TIMEOUT_MS = 10_000;
+const PROXY_TIMEOUT_MS = 30_000;
 
 async function proxy(request: NextRequest, path: string[]): Promise<NextResponse> {
   const target = new URL(`${BACKEND_BASE.replace(/\/$/, "")}/${path.join("/")}`);

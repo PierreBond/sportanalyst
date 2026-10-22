@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -943,17 +944,29 @@ async def _generate_prediction(
     )
 
 
+_batch_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_BATCH_CACHE_TTL = 300  # seconds
+
 @app.post("/api/v1/predictions/batch", response_model=BatchPredictionResponse)
 async def batch_predict(
     request: BatchPredictionRequest,
     db: AsyncSession | None = Depends(get_optional_db),
 ) -> BatchPredictionResponse:
     """Generate predictions for multiple matches in a single request."""
+    # ponytail: in-process TTL cache; avoids recomputing SHAP per page load
+    now_ts = time.time()
+    for k in [k for k, (ts, _) in _batch_cache.items() if now_ts - ts > _BATCH_CACHE_TTL]:
+        _batch_cache.pop(k, None)
 
     predictions = []
     for match in request.matches:
         match_id = match.get("match_id", "")
+        cached = _batch_cache.get(match_id)
+        if cached:
+            predictions.append(cached[1])
+            continue
         pred = await _generate_prediction(match_id, db=db)
+        _batch_cache[match_id] = (now_ts, pred)
         predictions.append(pred)
 
     return BatchPredictionResponse(
@@ -1099,7 +1112,7 @@ async def get_value_bets(
                     await db.execute(text("""
                         INSERT INTO bets_ledger (match_id, selection, model_prob, odds, edge,
                                                  stake_pct, sportsbook)
-                        VALUES (:mid::uuid, :sel, :mp, :odds, :edge, :stake, :book)
+                        VALUES (CAST(:mid AS uuid), :sel, :mp, :odds, :edge, :stake, :book)
                         ON CONFLICT (match_id, selection, sportsbook) DO NOTHING
                     """), {
                         "mid": row["match_id"], "sel": selection, "mp": model_prob,
