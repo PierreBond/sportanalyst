@@ -5,6 +5,7 @@ import type {
   MatchResearchSnapshot,
   UpcomingMatch,
   ModelsResponse,
+  MarketsResponse,
 } from "@/types";
 
 const INTERNAL_API_BASE = "/api/backend";
@@ -113,6 +114,12 @@ export async function getUpcomingLeagues(): Promise<{
 
 export async function getModels(): Promise<ModelsResponse> {
   return fetchJSON<ModelsResponse>(`${INTERNAL_API_BASE}/models`);
+}
+
+export async function getMarkets(matchId: string): Promise<MarketsResponse> {
+  return fetchJSON<MarketsResponse>(
+    `${INTERNAL_API_BASE}/api/v1/markets/${matchId}`
+  );
 }
 
 export function getWebSocketUrl(matchId: string): string {

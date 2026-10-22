@@ -117,3 +117,14 @@ export interface UpcomingMatch {
   scheduled_at: string;
   status: string;
 }
+
+export interface MarketsResponse {
+  match_id: string;
+  xg: { home: number; away: number; total: number };
+  totals: { line: number; p_over: number }[];
+  btts: number;
+  correct_scores: { score: string; prob: number }[];
+  outcome_probs_from_goals: { home_win: number; draw: number; away_win: number };
+  model_version: string;
+  xg_type: "goal_model";
+}

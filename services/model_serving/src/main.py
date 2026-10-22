@@ -163,6 +163,7 @@ _betting_engine: BettingEngine | None = None
 _explainer: PredictionExplainer | None = None
 _shap_explain: Any = None
 _predictor: ModelPredictor | None = None
+_poisson: dict[str, Any] | None = None
 
 # Loaded from metadata at startup for feature encoding
 _team_to_idx: dict[str, int] = {}
@@ -170,6 +171,7 @@ _league_to_idx: dict[str, int] = {}
 _known_team_names: set[str] = set()
 _team_elos: dict[str, float] = {}
 _model_brier_score: float | None = None
+_meta_feature_names: list[str] = []
 
 
 async def get_optional_db() -> AsyncGenerator[AsyncSession | None, None]:
@@ -263,7 +265,7 @@ async def lifespan(app: FastAPI):
 
     _betting_engine = BettingEngine()
 
-    global _team_to_idx, _league_to_idx, _known_team_names, _team_elos, _model_brier_score
+    global _team_to_idx, _league_to_idx, _known_team_names, _team_elos, _model_brier_score, _poisson, _meta_feature_names
 
     _predictor = ModelPredictor()
     _predictor.load_model()
@@ -291,9 +293,23 @@ async def lifespan(app: FastAPI):
             _known_team_names = set(_team_to_idx.keys())
             _team_elos = {name: float(v) for name, v in meta.get("team_elos", {}).items()}
             _model_brier_score = float(meta["brier_score"]) if meta.get("brier_score") is not None else None
+            _meta_feature_names = list(meta.get("feature_names", []))
             logger.info("feature_metadata_loaded", teams=len(_team_to_idx), leagues=len(_league_to_idx), elos=len(_team_elos))
         except Exception as e:
             logger.warning("feature_metadata_load_failed", error=str(e))
+
+    # Poisson goal models for xG / totals / BTTS / correct-score markets
+    if meta_path and meta_path.exists():
+        try:
+            import joblib
+
+            poisson_path = meta_path.parent / "poisson.joblib"
+            if poisson_path.exists():
+                _poisson = joblib.load(poisson_path)
+                logger.info("poisson_models_loaded", path=str(poisson_path))
+        except Exception as e:
+            logger.warning("poisson_models_load_failed", error=str(e))
+            _poisson = None
 
     # Initialize SHAP TreeExplainer from loaded model
     global _shap_explain
@@ -409,6 +425,72 @@ async def get_prediction(
             # Continue even if caching fails
 
     return prediction_data
+
+
+def _poisson_matrix(lam_h: float, lam_a: float, max_goals: int = 8) -> Any:
+    """Goal matrix P(home=i, away=j) from two independent Poisson distributions."""
+    from scipy.stats import poisson
+
+    ph = poisson.pmf(np.arange(max_goals + 1), lam_h)
+    pa = poisson.pmf(np.arange(max_goals + 1), lam_a)
+    return np.outer(ph, pa)
+
+
+@app.get("/api/v1/markets/{match_id}")
+async def get_markets(
+    match_id: str,
+    db: AsyncSession | None = Depends(get_optional_db),
+) -> dict[str, Any]:
+    """Derived markets for a match: xG proxy, totals, BTTS, correct scores.
+
+    xG is goal-model based (expected goals from the Poisson regressor trained
+    on final scores), not shot-based xG.
+    """
+    logger.info("markets_request", match_id=match_id)
+    if not _poisson:
+        raise HTTPException(status_code=503, detail="Poisson goal models not loaded")
+
+    features = await _build_features_for_match(match_id, db)
+    try:
+        import pandas as pd
+
+        frame = pd.DataFrame([{n: features.get(n, 0.0) for n in _meta_feature_names}])
+        lam_h = float(np.clip(_poisson["home"].predict(frame)[0], 0.05, 6.0))
+        lam_a = float(np.clip(_poisson["away"].predict(frame)[0], 0.05, 6.0))
+    except Exception as e:
+        logger.warning("markets_calculation_failed", match_id=match_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to compute goal expectations")
+
+    m = _poisson_matrix(lam_h, lam_a)
+    total = lam_h + lam_a
+
+    # totals via Poisson sum: total goals ~ Poisson(lam_h + lam_a)
+    from scipy.stats import poisson as _ps
+
+    def p_over(line: float) -> float:
+        return float(1.0 - _ps.cdf(int(line), total))
+
+    matrix_outcome = {
+        "home_win": float(np.tril(m, -1).sum()),
+        "draw": float(np.trace(m)),
+        "away_win": float(np.triu(m, 1).sum()),
+    }
+    btts = float((1.0 - np.exp(-lam_h)) * (1.0 - np.exp(-lam_a)))
+
+    scores = [{"score": f"{i}-{j}", "prob": float(round(m[i, j], 6))}
+              for i in range(m.shape[0]) for j in range(m.shape[1])]
+    top_scores = sorted(scores, key=lambda s: s["prob"], reverse=True)[:5]
+
+    return {
+        "match_id": match_id,
+        "xg": {"home": round(lam_h, 3), "away": round(lam_a, 3), "total": round(total, 3)},
+        "totals": [{"line": line, "p_over": round(p_over(line), 4)} for line in (0.5, 1.5, 2.5, 3.5)],
+        "btts": round(btts, 4),
+        "correct_scores": [{"score": s["score"], "prob": round(s["prob"], 4)} for s in top_scores],
+        "outcome_probs_from_goals": {k: round(v, 4) for k, v in matrix_outcome.items()},
+        "model_version": _predictor.model_version if _predictor else "unknown",
+        "xg_type": "goal_model",
+    }
 
 
 def _classify_confidence(max_prob: float) -> str:

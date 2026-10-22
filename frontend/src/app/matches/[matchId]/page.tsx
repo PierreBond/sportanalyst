@@ -4,15 +4,17 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { SHAPWaterfall } from "@/components/SHAPWaterfall";
 import { DataSourceBadge } from "@/components/DataSourceBadge";
-import { getPrediction, getWebSocketUrl } from "@/lib/api";
+import { MarketsPanel } from "@/components/MarketsPanel";
+import { getPrediction, getMarkets, getWebSocketUrl } from "@/lib/api";
 import { useWebSocket } from "@/lib/ws";
-import type { PredictionResponse } from "@/types";
+import type { PredictionResponse, MarketsResponse } from "@/types";
 
 export default function MatchDetailPage() {
   const params = useParams();
   const matchId = params.matchId as string;
 
   const [prediction, setPrediction] = useState<PredictionResponse | null>(null);
+  const [markets, setMarkets] = useState<MarketsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { connect, disconnect, isConnected } = useWebSocket({
@@ -41,6 +43,11 @@ export default function MatchDetailPage() {
         console.error(err);
       } finally {
         setLoading(false);
+      }
+      try {
+        setMarkets(await getMarkets(matchId));
+      } catch (err) {
+        console.error(err);
       }
     }
 
@@ -169,6 +176,12 @@ export default function MatchDetailPage() {
               </p>
             </div>
           </div>
+
+          {markets && (
+            <div className="mt-6">
+              <MarketsPanel markets={markets} />
+            </div>
+          )}
         </div>
 
         <div>
