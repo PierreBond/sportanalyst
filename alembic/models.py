@@ -15,6 +15,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -199,3 +200,22 @@ class Prediction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     __table_args__ = (Index("idx_pred_match", "match_id"),)
+
+
+class BetLedger(Base):
+    __tablename__ = "bets_ledger"
+
+    bet_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    match_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("matches.match_id"), nullable=False)
+    selection: Mapped[str] = mapped_column(String(10), nullable=False)
+    model_prob: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False)
+    odds: Mapped[float] = mapped_column(Numeric(7, 2), nullable=False)
+    edge: Mapped[float] = mapped_column(Numeric(6, 4), nullable=False)
+    stake_pct: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    sportsbook: Mapped[str] = mapped_column(String(40), nullable=False)
+    flagged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    won: Mapped[bool | None] = mapped_column(Boolean)
+    pnl_pct: Mapped[float | None] = mapped_column(Numeric(7, 4))
+
+    __table_args__ = (UniqueConstraint("match_id", "selection", "sportsbook"),)

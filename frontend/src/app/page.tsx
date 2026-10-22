@@ -131,6 +131,13 @@ export default function HomePage() {
               ? `Settled ${modelInfo.settlement.model.n}: model vs market Brier ${modelInfo.settlement.model.brier?.toFixed(3)} vs ${modelInfo.settlement.market_on_model.brier?.toFixed(3)} · accuracy ${((modelInfo.settlement.model.accuracy ?? 0) * 100).toFixed(1)}% vs ${((modelInfo.settlement.market_on_model.accuracy ?? 0) * 100).toFixed(1)}%`
               : "Settled predictions: none yet"}
           </p>
+          <p className="text-sm text-gray-500 mt-1">
+            {modelInfo?.value_bets_ledger?.settled
+              ? `Value-bet ledger (forward test): ${modelInfo.value_bets_ledger.settled} settled, ${(((modelInfo.value_bets_ledger.hit_rate ?? 0)) * 100).toFixed(0)}% hit, bankroll ${(modelInfo.value_bets_ledger.bankroll_return_pct ?? 0).toFixed(2)}%`
+              : modelInfo?.value_bets_ledger?.open
+                ? `Value-bet ledger (forward test): ${modelInfo.value_bets_ledger.open} open, none settled yet`
+                : "Value-bet ledger: no bets flagged yet"}
+          </p>
         </div>
       </div>
 

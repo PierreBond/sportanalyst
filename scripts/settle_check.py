@@ -55,6 +55,41 @@ def main():
     else:
         print("Market benchmark: no FT matches with odds")
 
+    # Part 3: settle flagged value bets (bets_ledger) for finished matches.
+    # Runs before the preds section, which early-returns on empty data.
+    try:
+        open_bets = pd.read_sql(text("""
+            SELECT b.bet_id::text, b.selection, b.odds, b.stake_pct,
+                   m.home_score, m.away_score
+            FROM bets_ledger b JOIN matches m ON b.match_id = m.match_id
+            WHERE b.settled_at IS NULL AND m.status = 'FT' AND m.home_score IS NOT NULL
+        """), engine)
+        settled_n = 0
+        with engine.begin() as conn:
+            for _, r in open_bets.iterrows():
+                hs, aws, sel = float(r.home_score), float(r.away_score), r.selection
+                won = {"home_win": hs > aws, "draw": hs == aws, "away_win": aws > hs}[sel]
+                stake = float(r.stake_pct) / 100.0
+                pnl = stake * (float(r.odds) - 1.0) if won else -stake
+                conn.execute(text("""
+                    UPDATE bets_ledger SET won = :w, pnl_pct = :p, settled_at = now()
+                    WHERE bet_id = :id
+                """), {"w": bool(won), "p": pnl, "id": r.bet_id})
+                settled_n += 1
+        summary = pd.read_sql(text("""
+            SELECT count(*) FILTER (WHERE settled_at IS NULL)::int AS open,
+                   count(*) FILTER (WHERE settled_at IS NOT NULL)::int AS settled,
+                   avg((won)::int) FILTER (WHERE settled_at IS NOT NULL) AS hit_rate,
+                   coalesce(sum(CASE WHEN settled_at IS NOT NULL THEN pnl_pct ELSE 0 END), 0) AS ret_pct
+            FROM bets_ledger
+        """), engine).iloc[0]
+        print("\n=== Value-bet ledger ===")
+        print(f"settled {settled_n} new; ledger: open={summary['open']} settled={summary['settled']} "
+              f"hit={summary['hit_rate'] if summary['hit_rate'] is not None else 'n/a'} "
+              f"bankroll_return={float(summary['ret_pct']):+.2f}%")
+    except Exception as e:
+        print(f"\n=== Value-bet ledger === unavailable: {e}")
+
     preds = pd.read_sql(text("""
         SELECT p.match_id::text, p.home_win_prob, p.draw_prob, p.away_win_prob,
                m.home_score, m.away_score

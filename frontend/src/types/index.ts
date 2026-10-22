@@ -77,6 +77,13 @@ export interface Settlement {
   market_on_model: SettlementStats;
 }
 
+export interface BetsLedgerStats {
+  open: number;
+  settled: number;
+  hit_rate: number | null;
+  bankroll_return_pct: number;
+}
+
 export interface ModelInfo {
   name: string;
   version: string;
@@ -87,6 +94,7 @@ export interface ModelInfo {
   n_matches: number;
   n_features: number;
   settlement?: Settlement | null;
+  value_bets_ledger?: BetsLedgerStats | null;
 }
 
 export interface ModelsResponse {

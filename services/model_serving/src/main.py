@@ -1023,6 +1023,7 @@ async def get_value_bets(
                     m.match_id::text AS match_id,
                     ht.name AS home_team,
                     at.name AS away_team,
+                    m.scheduled_at,
                     os.home_odds, os.draw_odds, os.away_odds,
                     os.sportsbook, os.captured_at,
                     p.home_win_prob, p.draw_prob, p.away_win_prob
@@ -1086,6 +1087,24 @@ async def get_value_bets(
                 "sportsbook": row["sportsbook"],
                 "odds_captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
             })
+            # ponytail: persist flagged bets for forward-testing; unique constraint
+            # dedupes so repeated GETs don't duplicate rows
+            scheduled = row.get("scheduled_at")
+            if db is not None and scheduled and scheduled > datetime.now(timezone.utc):
+                try:
+                    await db.execute(text("""
+                        INSERT INTO bets_ledger (match_id, selection, model_prob, odds, edge,
+                                                 stake_pct, sportsbook)
+                        VALUES (:mid::uuid, :sel, :mp, :odds, :edge, :stake, :book)
+                        ON CONFLICT (match_id, selection, sportsbook) DO NOTHING
+                    """), {
+                        "mid": row["match_id"], "sel": selection, "mp": model_prob,
+                        "odds": best_odds, "edge": edge,
+                        "stake": min(edge * 25, 5.0), "book": row["sportsbook"],
+                    })
+                    await db.commit()
+                except Exception as e:
+                    logger.warning("bets_ledger_insert_failed", match_id=row["match_id"], error=str(e))
 
     # Try to cache, but don't fail if it's unavailable
     if date and _cache:
@@ -1218,6 +1237,31 @@ async def _settlement_stats(db: AsyncSession | None) -> dict[str, Any] | None:
         return None
 
 
+async def _bets_ledger_stats(db: AsyncSession | None) -> dict[str, Any] | None:
+    """Forward-testing ledger summary; None when DB/table unavailable."""
+    if db is None:
+        return None
+    try:
+        r = (await db.execute(text("""
+            SELECT count(*) FILTER (WHERE settled_at IS NULL)::int AS open,
+                   count(*) FILTER (WHERE settled_at IS NOT NULL)::int AS settled,
+                   avg((won)::int) FILTER (WHERE settled_at IS NOT NULL) AS hit_rate,
+                   coalesce(sum(CASE WHEN settled_at IS NOT NULL THEN pnl_pct ELSE 0 END), 0) AS ret_pct
+            FROM bets_ledger
+        """))).mappings().first()
+        if r is None:
+            return None
+        return {
+            "open": int(r["open"]),
+            "settled": int(r["settled"]),
+            "hit_rate": round(float(r["hit_rate"]), 4) if r["hit_rate"] is not None else None,
+            "bankroll_return_pct": round(float(r["ret_pct"]), 2),
+        }
+    except Exception as e:
+        logger.warning("bets_ledger_query_failed", error=str(e))
+        return None
+
+
 @app.get("/models")
 async def list_models(db: AsyncSession | None = Depends(get_optional_db)) -> dict[str, Any]:
     """List available prediction models and their metadata."""
@@ -1241,6 +1285,7 @@ async def list_models(db: AsyncSession | None = Depends(get_optional_db)) -> dic
                 "n_matches": meta.get("n_matches", 8538),
                 "n_features": meta.get("n_features", 37),
                 "settlement": await _settlement_stats(db),
+                "value_bets_ledger": await _bets_ledger_stats(db),
             },
         ]
     }
