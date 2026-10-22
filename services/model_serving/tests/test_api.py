@@ -49,6 +49,40 @@ async def test_get_prediction(client):
     assert "shap_explanation" in data
 
 
+class _FakeRegressor:
+    def predict(self, frame):
+        import numpy as np
+
+        return np.array([1.4] * len(frame))
+
+
+@pytest.mark.asyncio
+async def test_markets_endpoint(client):
+    from services.model_serving.src import main as main_mod
+
+    fake = {"home": _FakeRegressor(), "away": _FakeRegressor()}
+    with patch.object(main_mod, "_poisson", fake):
+        response = await client.get("/api/v1/markets/market-test-1")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["match_id"] == "market-test-1"
+    assert data["xg"]["home"] == 1.4 and data["xg"]["away"] == 1.4
+    assert {t["line"] for t in data["totals"]} == {0.5, 1.5, 2.5, 3.5}
+    assert 0.0 < data["btts"] < 1.0
+    assert len(data["correct_scores"]) == 5
+    outcome = data["outcome_probs_from_goals"]
+    assert abs(sum(outcome.values()) - 1.0) < 0.01
+
+
+@pytest.mark.asyncio
+async def test_markets_endpoint_503_without_poisson(client):
+    from services.model_serving.src import main as main_mod
+
+    with patch.object(main_mod, "_poisson", None):
+        response = await client.get("/api/v1/markets/market-test-2")
+    assert response.status_code == 503
+
+
 @pytest.mark.asyncio
 async def test_batch_prediction(client):
     request_data = {
