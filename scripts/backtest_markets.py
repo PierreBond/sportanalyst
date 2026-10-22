@@ -15,7 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from train_model import load_data, engineer_features
 
 
-def main():
+def build_test_frame():
+    """Shared pipeline: load, engineer, merge odds, split seasons.
+    Used by this script and backtest_value_bets.py."""
     df = load_data()
     df, _elo = engineer_features(df)
 
@@ -59,6 +61,12 @@ def main():
     test_season = seasons[-1]
     train_mask = df["season"].astype(str).isin(seasons[:-1])
     test_mask = df["season"].astype(str) == test_season
+    return df, X, train_mask, test_mask
+
+
+def main():
+    df, X, train_mask, test_mask = build_test_frame()
+    test_season = df.loc[test_mask, "season"].astype(str).iloc[0]
     print(f"Test season: {test_season} ({test_mask.sum()} matches)")
 
     poisson_home = PoissonRegressor(alpha=0.1, max_iter=500)
