@@ -1031,7 +1031,11 @@ async def get_value_bets(
                 JOIN matches m ON os.match_id = m.match_id
                 JOIN teams ht ON m.home_team_id = ht.team_id
                 JOIN teams at ON m.away_team_id = at.team_id
-                LEFT JOIN predictions p ON p.match_id = m.match_id
+                LEFT JOIN LATERAL (
+                    SELECT * FROM predictions
+                    WHERE match_id = m.match_id
+                    ORDER BY predicted_at DESC LIMIT 1
+                ) p ON true
             """
             # ponytail: DISTINCT ON needs matching ORDER BY to pick latest snapshot
             if date:
