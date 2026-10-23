@@ -32,13 +32,13 @@ from sports_common.security import setup_security
 from sports_common.team_map import resolve_team_name as _resolve_team_name
 
 try:
-    from .betting import BettingEngine
+    from .betting import BettingEngine, cap_slate
     from .cache import PredictionCache
     from .calibrator import ProbabilityCalibrator
     from .explainer import PredictionExplainer
     from .predictor import ModelPredictor
 except ImportError:
-    from betting import BettingEngine
+    from betting import BettingEngine, cap_slate
     from cache import PredictionCache
     from calibrator import ProbabilityCalibrator
     from explainer import PredictionExplainer
@@ -173,6 +173,7 @@ _known_team_names: set[str] = set()
 _team_elos: dict[str, float] = {}
 _model_brier_score: float | None = None
 _meta_feature_names: list[str] = []
+_blend_weight: float = 1.0
 
 
 async def get_optional_db() -> AsyncGenerator[AsyncSession | None, None]:
@@ -266,7 +267,7 @@ async def lifespan(app: FastAPI):
 
     _betting_engine = BettingEngine()
 
-    global _team_to_idx, _league_to_idx, _known_team_names, _team_elos, _model_brier_score, _poisson, _meta_feature_names
+    global _team_to_idx, _league_to_idx, _known_team_names, _team_elos, _model_brier_score, _poisson, _meta_feature_names, _blend_weight
 
     _predictor = ModelPredictor()
     _predictor.load_model()
@@ -295,6 +296,11 @@ async def lifespan(app: FastAPI):
             _team_elos = {name: float(v) for name, v in meta.get("team_elos", {}).items()}
             _model_brier_score = float(meta["brier_score"]) if meta.get("brier_score") is not None else None
             _meta_feature_names = list(meta.get("feature_names", []))
+            sweep = meta.get("blend_sweep_best") or {}
+            w = float(sweep.get("weight_xgb", 1.0))
+            if 0.05 <= w <= 0.95:
+                _blend_weight = w
+                logger.info("blend_weight_loaded", weight_xgb=w)
             logger.info("feature_metadata_loaded", teams=len(_team_to_idx), leagues=len(_league_to_idx), elos=len(_team_elos))
         except Exception as e:
             logger.warning("feature_metadata_load_failed", error=str(e))
@@ -435,6 +441,35 @@ def _poisson_matrix(lam_h: float, lam_a: float, max_goals: int = 8) -> Any:
     ph = poisson.pmf(np.arange(max_goals + 1), lam_h)
     pa = poisson.pmf(np.arange(max_goals + 1), lam_a)
     return np.outer(ph, pa)
+
+
+def _poisson_1x2(lam_h: float, lam_a: float) -> tuple[float, float, float]:
+    m = _poisson_matrix(lam_h, lam_a)
+    return (
+        float(np.tril(m, -1).sum()),
+        float(np.trace(m)),
+        float(np.triu(m, 1).sum()),
+    )
+
+
+def _blend_with_poisson(raw_probs, features: dict) -> tuple[float, float, float] | None:
+    """Blend XGBoost with the Poisson goal model; None when disabled/fails."""
+    if _blend_weight >= 1.0 or not _poisson or not _meta_feature_names:
+        return None
+    try:
+        import pandas as pd
+
+        frame = pd.DataFrame([{n: features.get(n, 0.0) for n in _meta_feature_names}])
+        lam_h = float(np.clip(_poisson["home"].predict(frame)[0], 0.05, 6.0))
+        lam_a = float(np.clip(_poisson["away"].predict(frame)[0], 0.05, 6.0))
+        pois = _poisson_1x2(lam_h, lam_a)
+        return tuple(
+            _blend_weight * x + (1.0 - _blend_weight) * p
+            for x, p in zip(raw_probs, pois)
+        )
+    except Exception as e:
+        logger.warning("prediction_blend_failed", error=str(e))
+        return None
 
 
 @app.get("/api/v1/markets/{match_id}")
@@ -843,6 +878,9 @@ async def _generate_prediction(
                 float(raw_probs[1]),
                 float(raw_probs[2]),
             )
+            blended = _blend_with_poisson(raw_probs, features)
+            if blended:
+                home_win_prob, draw_prob, away_win_prob = blended
         except Exception as e:
             logger.warning("prediction_model_error", match_id=match_id, error=str(e))
             home_win_prob, draw_prob, away_win_prob = _generate_prediction_probabilities(match_id)
@@ -1063,7 +1101,7 @@ async def get_value_bets(
         except Exception as e:
             logger.warning("value_bets_query_failed", error=str(e))
 
-    value_bets = []
+    candidates: list[dict[str, Any]] = []
     for row in rows:
         edge = 0.0
         selection = "home_win"
@@ -1091,7 +1129,7 @@ async def get_value_bets(
             selection = "draw"
 
         if edge >= min_edge:
-            value_bets.append({
+            candidates.append({
                 "match_id": row["match_id"],
                 "home_team": row["home_team"],
                 "away_team": row["away_team"],
@@ -1101,13 +1139,30 @@ async def get_value_bets(
                 "implied_prob": implied_prob,
                 "edge": edge,
                 "kelly_stake_pct": round(edge * 25, 2),
+                "stake_pct": min(edge * 25, 5.0) / 100.0,
                 "sportsbook": row["sportsbook"],
                 "odds_captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
+                "_scheduled": row.get("scheduled_at"),
             })
+
+    # ponytail: per-slate caps (greedy by edge) before listing/persisting; keeps
+    # the forward test to a real bankroll policy, raise caps in betting.py
+    from collections import defaultdict
+
+    by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for cand in candidates:
+        sched = cand.get("_scheduled")
+        by_day[sched.date().isoformat() if sched else "unscheduled"].append(cand)
+
+    value_bets = []
+    db_now = datetime.now(timezone.utc)
+    for slate in by_day.values():
+        for cand in cap_slate(slate):
+            sched = cand.pop("_scheduled")
+            cand.pop("stake_pct")
             # ponytail: persist flagged bets for forward-testing; unique constraint
             # dedupes so repeated GETs don't duplicate rows
-            scheduled = row.get("scheduled_at")
-            if db is not None and scheduled and scheduled > datetime.now(timezone.utc):
+            if db is not None and sched and sched > db_now:
                 try:
                     await db.execute(text("""
                         INSERT INTO bets_ledger (match_id, selection, model_prob, odds, edge,
@@ -1115,13 +1170,15 @@ async def get_value_bets(
                         VALUES (CAST(:mid AS uuid), :sel, :mp, :odds, :edge, :stake, :book)
                         ON CONFLICT (match_id, selection, sportsbook) DO NOTHING
                     """), {
-                        "mid": row["match_id"], "sel": selection, "mp": model_prob,
-                        "odds": best_odds, "edge": edge,
-                        "stake": min(edge * 25, 5.0), "book": row["sportsbook"],
+                        "mid": cand["match_id"], "sel": cand["selection"],
+                        "mp": cand["model_prob"], "odds": cand["best_odds"],
+                        "edge": cand["edge"], "stake": cand["stake_pct"] * 100.0,
+                        "book": cand["sportsbook"],
                     })
                     await db.commit()
                 except Exception as e:
-                    logger.warning("bets_ledger_insert_failed", match_id=row["match_id"], error=str(e))
+                    logger.warning("bets_ledger_insert_failed", match_id=cand["match_id"], error=str(e))
+            value_bets.append(cand)
 
     # Try to cache, but don't fail if it's unavailable
     if date and _cache:
@@ -1301,6 +1358,11 @@ async def list_models(db: AsyncSession | None = Depends(get_optional_db)) -> dic
                 "trained_at": meta.get("trained_at", "unknown"),
                 "n_matches": meta.get("n_matches", 8538),
                 "n_features": meta.get("n_features", 37),
+                "blend": {
+                    "weight_xgb": meta.get("blend_sweep_best", {}).get("weight_xgb", 1.0),
+                    "validation_accuracy": meta.get("blend_sweep_best", {}).get("accuracy"),
+                    "note": "weight selected on the held-out validation season; blended probs = w*XGBoost + (1-w)*Poisson goal model",
+                } if float(meta.get("blend_sweep_best", {}).get("weight_xgb", 1.0)) < 1.0 else None,
                 "settlement": await _settlement_stats(db),
                 "value_bets_ledger": await _bets_ledger_stats(db),
             },

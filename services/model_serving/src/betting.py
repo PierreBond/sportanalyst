@@ -17,6 +17,35 @@ class BetSelection(str, Enum):
 EDGE_THRESHOLD = 0.03
 MAX_EXPOSURE_PER_MATCH = 0.05
 MAX_DAILY_EXPOSURE = 0.15
+MAX_SLATE_BETS = 10
+
+
+def cap_slate(
+    bets,
+    max_daily_exposure: float = MAX_DAILY_EXPOSURE,
+    max_bets: int = MAX_SLATE_BETS,
+) -> list:
+    """Keep bets within per-slate stake and count caps, greedy by edge (highest first).
+
+    Args:
+        bets: Dict-like objects with 'edge' (probability) and 'stake_pct'
+              (fraction of bankroll) keys.
+        max_daily_exposure: Maximum combined stake per slate (fraction).
+        max_bets: Maximum number of bets per slate.
+
+    Returns:
+        Kept bets sorted by edge descending. Lower-edge bets can still be
+        kept when a bigger-stake bet does not fit the remaining budget.
+    """
+    kept: list = []
+    used = 0.0
+    for b in sorted(bets, key=lambda b: float(b.get("edge", 0.0)), reverse=True):
+        stake = float(b.get("stake_pct", 0.0))
+        if len(kept) >= max_bets or used + stake > max_daily_exposure:
+            continue
+        kept.append(b)
+        used += stake
+    return kept
 
 
 def implied_probability(decimal_odds: float) -> float:

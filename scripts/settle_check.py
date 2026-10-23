@@ -121,4 +121,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    from notify import notify
+    try:
+        main()
+    except Exception as e:
+        notify("settle_check crashed", str(e)[:400])
+        raise

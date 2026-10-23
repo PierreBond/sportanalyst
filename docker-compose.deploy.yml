@@ -59,6 +59,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://user:pass@postgres:5432/sportspred
       DATABASE_URL_SYNC: postgresql://user:pass@postgres:5432/sportspred
       ODDS_API_KEY: ${ODDS_API_KEY}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}  # optional; push alerts on cron failure/low quota
       REFRESH_DELAY: "21600"     # initial stagger: 6h
       REFRESH_INTERVAL: "86400"  # then every 24h
     command: >

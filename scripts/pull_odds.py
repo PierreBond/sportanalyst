@@ -7,6 +7,8 @@ from uuid import uuid4
 import httpx
 from sqlalchemy import create_engine, text
 
+from notify import notify
+
 DB_URL = os.environ.get("DATABASE_URL_SYNC")
 # strip inline "# comment" some .env parsers keep in the value
 ODDS_API_KEY = (os.environ.get("ODDS_API_KEY") or "").split("#")[0].strip()
@@ -157,5 +159,17 @@ def main():
 
     print(f"Inserted {inserted} odds snapshots, {remaining} requests remaining, {errors} errors")
 
+    if errors:
+        notify("odds pull: API errors", f"{errors} league request(s) failed; inserted={inserted}; quota={remaining}")
+    if remaining <= 50:
+        notify("odds pull: low quota", f"the-odds-api quota: {remaining} requests remaining", priority="high")
+    if inserted == 0 and match_map:
+        notify("odds pull: zero coverage", "cron ran but inserted 0 snapshots; check unmatched fixtures")
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        notify("odds pull crashed", str(e)[:400])
+        raise

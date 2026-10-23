@@ -56,6 +56,38 @@ class _FakeRegressor:
         return np.array([1.4] * len(frame))
 
 
+def test_blend_with_poisson_applies_weight():
+    import numpy as np
+    from scipy.stats import poisson
+    from services.model_serving.src import main as main_mod
+    from unittest.mock import patch
+
+    lam = 1.4
+    pmf = poisson.pmf(np.arange(9), lam)
+    m = np.outer(pmf, pmf)
+    pois = (float(np.tril(m, -1).sum()), float(np.trace(m)), float(np.triu(m, 1).sum()))
+
+    fake = {"home": _FakeRegressor(), "away": _FakeRegressor()}
+    raw = [0.5, 0.3, 0.2]
+    with patch.object(main_mod, "_poisson", fake), \
+         patch.object(main_mod, "_meta_feature_names", ["f1"]), \
+         patch.object(main_mod, "_blend_weight", 0.7):
+        blended = main_mod._blend_with_poisson(raw, {"f1": 0.0})
+
+    assert blended is not None
+    for r, e, b in zip(raw, pois, blended):
+        assert b == pytest.approx(0.7 * r + 0.3 * e, abs=1e-9)
+    assert abs(sum(blended) - 1.0) < 1e-3
+
+
+def test_blend_disabled_at_weight_one():
+    from services.model_serving.src import main as main_mod
+    from unittest.mock import patch
+
+    with patch.object(main_mod, "_blend_weight", 1.0):
+        assert main_mod._blend_with_poisson([0.5, 0.3, 0.2], {}) is None
+
+
 @pytest.mark.asyncio
 async def test_markets_endpoint(client):
     from services.model_serving.src import main as main_mod

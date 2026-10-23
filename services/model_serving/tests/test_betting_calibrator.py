@@ -6,11 +6,44 @@ import pytest
 from services.model_serving.src.betting import (
     BettingEngine,
     BetSelection,
+    cap_slate,
     implied_probability,
     kelly_fraction,
     remove_vig,
 )
 from services.model_serving.src.calibrator import ProbabilityCalibrator
+
+
+class TestCapSlate:
+    """Tests for cap_slate."""
+
+    @staticmethod
+    def _bet(edge: float, stake: float):
+        return {"edge": edge, "stake_pct": stake}
+
+    def test_keeps_highest_edges_first(self) -> None:
+        bets = [self._bet(0.03 + i * 0.01, 0.01) for i in range(12)]
+        kept = cap_slate(bets, max_bets=5)
+        assert len(kept) == 5
+        edges = [b["edge"] for b in kept]
+        assert edges == sorted(edges, reverse=True)
+
+    def test_respects_max_bets(self) -> None:
+        bets = [self._bet(0.05, 0.01) for _ in range(15)]
+        assert len(cap_slate(bets, max_bets=10)) == 10
+
+    def test_respects_daily_exposure(self) -> None:
+        bets = [self._bet(0.05, 0.06) for _ in range(10)]
+        kept = cap_slate(bets, max_daily_exposure=0.15)
+        assert sum(b["stake_pct"] for b in kept) <= 0.15
+
+    def test_small_stake_fills_budget(self) -> None:
+        bets = [self._bet(0.10, 0.12), self._bet(0.03, 0.01)]
+        kept = cap_slate(bets, max_daily_exposure=0.15)
+        assert len(kept) == 2
+
+    def test_empty(self) -> None:
+        assert cap_slate([]) == []
 
 
 class TestImpliedProbability:

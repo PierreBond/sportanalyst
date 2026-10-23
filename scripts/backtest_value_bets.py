@@ -11,8 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "libs"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from backtest_markets import build_test_frame
-from services.model_serving.src.betting import BettingEngine
+from services.model_serving.src.betting import BettingEngine, cap_slate
 import joblib
+from collections import defaultdict
 
 
 def main():
@@ -27,6 +28,7 @@ def main():
     sel_to_col = {"home_win": 0, "draw": 1, "away_win": 2}
     odds_cols = {"home_win": "home_odds", "draw": "draw_odds", "away_win": "away_odds"}
 
+    by_day: dict[str, list] = defaultdict(list)
     bets = []
     for i, row in tdf.iterrows():
         p = {"home_win": probs[i, 0], "draw": probs[i, 1], "away_win": probs[i, 2]}
@@ -40,13 +42,16 @@ def main():
             actual = 0 if hs > as_ else (1 if hs == as_ else 2)
             won = actual == sel_to_col[outcome]
             kelly = min(b.stake, 5.0) / 100.0  # b.stake is kelly% capped at 5 (percent)
-            bets.append({
+            by_day[str(row["scheduled_at"])[:10]].append({
                 "match_id": b.match_id, "selection": outcome, "odds": b.odds,
                 "edge": b.expected_value, "won": won,
                 "pnl_flat": (b.odds - 1.0) if won else -1.0,
-                "stake_kelly": kelly,
+                "stake_pct": kelly,
                 "pnl_kelly": kelly * (b.odds - 1.0) if won else -kelly,
             })
+
+    for slate in by_day.values():
+        bets.extend(cap_slate(slate))
 
     if not bets:
         print("No value bets found in test season.")
