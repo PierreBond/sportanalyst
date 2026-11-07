@@ -25,6 +25,7 @@ services:
       API_KEY: ${API_KEY:-yhYFZIBxoz7cY2vrBVwh3SnWZgqaSy/cLDt4ElHeeoM=}
       MODEL_PATH: /app/models/predictor.joblib
       MODEL_METADATA_PATH: /app/models/predictor_metadata.json
+      CALIBRATOR_PATH: /app/models/calibrator.json
     depends_on:
       postgres:
         condition: service_started

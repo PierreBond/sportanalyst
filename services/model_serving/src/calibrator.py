@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
+import joblib
 import numpy as np
 
 
@@ -95,22 +95,10 @@ class ProbabilityCalibrator:
         state = {
             "n_classes": self._n_classes,
             "is_fitted": self._is_fitted,
-            "calibrators": {
-                str(c): {
-                    "x_min": iso.x_min,
-                    "x_max": iso.x_max,
-                    "x_out": iso.x_out.tolist()
-                    if hasattr(iso.x_out, "tolist")
-                    else list(iso.x_out),
-                    "y_in": iso.y_in.tolist() if hasattr(iso.y_in, "tolist") else list(iso.y_in),
-                    "y_out": iso.y_out.tolist()
-                    if hasattr(iso.y_out, "tolist")
-                    else list(iso.y_out),
-                }
-                for c, iso in self._calibrators.items()
-            },
+            "calibrators": self._calibrators,
         }
-        path.write_text(json.dumps(state))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(state, path)
 
     def load(self, path: Path) -> None:
         """Load calibrator state from disk.
@@ -118,23 +106,10 @@ class ProbabilityCalibrator:
         Args:
             path: Path to load the calibrator state from.
         """
-        state = json.loads(path.read_text())
+        state = joblib.load(path)
         self._n_classes = state["n_classes"]
         self._is_fitted = state["is_fitted"]
-        self._calibrators = {}
-
-        for c_str, iso_state in state["calibrators"].items():
-            c = int(c_str)
-            IsotonicRegression = self._get_isotonic()
-            iso = IsotonicRegression(
-                y_min=iso_state["x_min"], y_max=iso_state["x_max"], out_of_bounds="clip"
-            )
-            iso.x_min = iso_state["x_min"]
-            iso.x_max = iso_state["x_max"]
-            iso.x_out = np.array(iso_state["x_out"])
-            iso.y_in = np.array(iso_state["y_in"])
-            iso.y_out = np.array(iso_state["y_out"])
-            self._calibrators[c] = iso
+        self._calibrators = state["calibrators"]
 
     def get_calibration_curve(self, raw_probs: np.ndarray, y_true: np.ndarray) -> dict[str, Any]:
         """Compute calibration curve data for reliability diagram.

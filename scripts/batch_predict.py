@@ -10,10 +10,20 @@ from sqlalchemy import create_engine, text
 
 # allow running without the package pip-installed (libs/ lives in the repo)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "libs"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "services" / "model_serving" / "src"))
 from sports_common.team_map import resolve_team_name  # noqa: E402
+from calibrator import ProbabilityCalibrator  # noqa: E402
 
 DB_URL = os.environ.get("DATABASE_URL_SYNC")
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
+calibrator_path = MODEL_DIR / "calibrator.json"
+_calibrator = None
+if calibrator_path.exists():
+    try:
+        _calibrator = ProbabilityCalibrator()
+        _calibrator.load(calibrator_path)
+    except Exception:
+        _calibrator = None
 
 def build_features(match_row, team_idx, league_idx, elos, db):
     mid, home, away, league, season, scheduled_at, home_tid, away_tid = match_row
@@ -190,6 +200,9 @@ def main():
         else:
             import xgboost as xgb
             probs = model.predict(xgb.DMatrix(feat_df, feature_names=fnames))
+
+        if _calibrator and _calibrator.is_fitted:
+            probs = _calibrator.calibrate(raw)[0]
 
         mid = u[0]
         with db.connect() as conn:

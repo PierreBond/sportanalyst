@@ -225,7 +225,7 @@ def _calibrator_path() -> Path:
     configured = os.getenv("CALIBRATOR_PATH")
     if configured:
         return Path(configured)
-    return Path(__file__).resolve().parent.parent / "models" / "calibrator.json"
+    return Path("models") / "calibrator.json"
 
 
 def _metadata_path() -> Path:
@@ -546,7 +546,7 @@ def _build_prediction_payload(
     shap_explanation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the prediction response payload."""
-    home_win_prob, draw_prob, away_win_prob = probabilities
+    home_win_prob, draw_prob, away_win_prob = map(float, probabilities)
     max_prob = max(home_win_prob, draw_prob, away_win_prob)
     match_context = context or {}
 
@@ -1105,9 +1105,13 @@ async def get_value_bets(
     for row in rows:
         edge = 0.0
         selection = "home_win"
-        h_prob = float(row["home_win_prob"]) if row.get("home_win_prob") else 0.0
-        d_prob = float(row["draw_prob"]) if row.get("draw_prob") else 0.0
-        a_prob = float(row["away_win_prob"]) if row.get("away_win_prob") else 0.0
+        raw_probs = [float(row["home_win_prob"]) if row.get("home_win_prob") else 0.0,
+                     float(row["draw_prob"]) if row.get("draw_prob") else 0.0,
+                     float(row["away_win_prob"]) if row.get("away_win_prob") else 0.0]
+        if _calibrator and _calibrator.is_fitted and sum(raw_probs) > 0:
+            h_prob, d_prob, a_prob = map(float, _calibrator.calibrate(np.array([raw_probs]))[0])
+        else:
+            h_prob, d_prob, a_prob = raw_probs
         home_odds_f = float(row["home_odds"]) if row["home_odds"] else 0.0
         away_odds_f = float(row["away_odds"]) if row["away_odds"] else 0.0
         draw_odds_f = float(row["draw_odds"]) if row["draw_odds"] else 0.0
@@ -1159,7 +1163,7 @@ async def get_value_bets(
     for slate in by_day.values():
         for cand in cap_slate(slate):
             sched = cand.pop("_scheduled")
-            cand.pop("stake_pct")
+            stake_pct = cand.pop("stake_pct")
             # ponytail: persist flagged bets for forward-testing; unique constraint
             # dedupes so repeated GETs don't duplicate rows
             if db is not None and sched and sched > db_now:
@@ -1172,7 +1176,7 @@ async def get_value_bets(
                     """), {
                         "mid": cand["match_id"], "sel": cand["selection"],
                         "mp": cand["model_prob"], "odds": cand["best_odds"],
-                        "edge": cand["edge"], "stake": cand["stake_pct"] * 100.0,
+                        "edge": cand["edge"], "stake": stake_pct * 100.0,
                         "book": cand["sportsbook"],
                     })
                     await db.commit()
