@@ -62,7 +62,7 @@ def main():
             SELECT b.bet_id::text, b.selection, b.odds, b.stake_pct,
                    m.home_score, m.away_score
             FROM bets_ledger b JOIN matches m ON b.match_id = m.match_id
-            WHERE b.settled_at IS NULL AND m.status = 'FT' AND m.home_score IS NOT NULL
+            WHERE b.settled_at IS NULL AND m.status IN ('FT', 'finished') AND m.home_score IS NOT NULL
         """), engine)
         settled_n = 0
         with engine.begin() as conn:
