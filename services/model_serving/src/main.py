@@ -32,7 +32,7 @@ from sports_common.security import setup_security
 from sports_common.team_map import resolve_team_name as _resolve_team_name
 
 try:
-    from .betting import BettingEngine, cap_slate
+    from .betting import BettingEngine, cap_slate, MAX_BET_ODDS
     from .cache import PredictionCache
     from .calibrator import ProbabilityCalibrator
     from .explainer import PredictionExplainer
@@ -1116,6 +1116,21 @@ async def get_value_bets(
         away_odds_f = float(row["away_odds"]) if row["away_odds"] else 0.0
         draw_odds_f = float(row["draw_odds"]) if row["draw_odds"] else 0.0
         best_odds = max(home_odds_f, draw_odds_f, away_odds_f)
+
+        # ponytail: skip extreme longshots where model is least reliable
+        if best_odds > MAX_BET_ODDS:
+            continue
+
+        # ponytail: blend XGB with Poisson goal model to pull extreme underdog
+        # probabilities toward goal-based expectations
+        try:
+            features = await _build_features_for_match(row["match_id"], db)
+            blended = _blend_with_poisson([h_prob, d_prob, a_prob], features)
+            if blended:
+                h_prob, d_prob, a_prob = blended
+        except Exception as e:
+            logger.warning("value_bets_blend_failed", match_id=row["match_id"], error=str(e))
+
         if home_odds_f > 0 and home_odds_f == float(best_odds):
             implied_prob = round(1.0 / home_odds_f, 4)
             model_prob = h_prob or implied_prob
