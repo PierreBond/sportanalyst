@@ -1,5 +1,10 @@
-"""Backfill scores from football-data.co.uk CSV files for the 2026-27 season."""
+"""Backfill scores for 'finished' matches from openfootball/football.json (GitHub, no API key).
+
+Downloads the 2026-27 season JSON for each covered league, canonicalizes team names,
+and updates matches that have status='finished' but no score.
+"""
 import io
+import json
 import os
 import sys
 import time
@@ -14,55 +19,57 @@ from pull_odds import canon
 
 DB_URL = os.environ.get("DATABASE_URL_SYNC")
 
-# football-data.co.uk division codes for 2026-27 season
-LEAGUE_CODES = {
-    "premier_league": "E0",
-    "serie_a": "I1",
-    "la_liga": "SP1",
-    "bundesliga": "D1",
-    "ligue_1": "F1",
-    "eredivisie": "N1",
-    "brasileirao": None,  # not on football-data.co.uk
+LEAGUE_URLS = {
+    "premier_league": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/en.1.json",
+    "bundesliga": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/de.1.json",
+    "la_liga": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/es.1.json",
+    "serie_a": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/it.1.json",
+    "ligue_1": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/fr.1.json",
+    "eredivisie": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/nl.1.json",
 }
 
-BASE_URL = "https://football-data.co.uk/mmz4281/2627/"
+UNSUPPORTED = ["brasileirao"]
 
 
-def backfill_league(league: str, code: str | None, engine) -> int:
-    if code is None:
-        print(f"  [{league}] not on football-data.co.uk, skipping")
-        return 0
-
-    url = f"{BASE_URL}{code}.csv"
-
+def backfill_league(league, url, engine):
     try:
         r = httpx.get(url, timeout=30)
     except Exception as e:
-        print(f"  [{league}] download failed: {e}")
+        print("  [{}] request failed: {}".format(league, e))
         return 0
 
     if r.status_code != 200:
-        print(f"  [{league}] HTTP {r.status_code}")
+        print("  [{}] HTTP {}".format(league, r.status_code))
         return 0
 
     try:
-        df = pd.read_csv(io.BytesIO(r.content))
+        data = json.loads(r.text)
     except Exception as e:
-        print(f"  [{league}] parse failed: {e}")
+        print("  [{}] parse failed: {}".format(league, e))
         return 0
 
-    if df.empty:
-        print(f"  [{league}] empty CSV")
+    matches = data.get("matches", [])
+    if not matches:
+        print("  [{}] no matches found".format(league))
         return 0
 
-    # Canonicalize team names in the CSV data
-    df["home_canon"] = df["HomeTeam"].apply(lambda x: canon(str(x)))
-    df["away_canon"] = df["AwayTeam"].apply(lambda x: canon(str(x)))
+    score_map = {}
+    for m in matches:
+        score = m.get("score")
+        if not score or "ft" not in score:
+            continue
+        ft = score["ft"]
+        if len(ft) != 2 or ft[0] is None or ft[1] is None:
+            continue
+        key = (canon(m["team1"]), canon(m["team2"]), m["date"])
+        score_map[key] = (int(ft[0]), int(ft[1]))
 
-    # Load finished matches lacking scores from DB
+    n_scores = len(score_map)
+    print("  [{}] {} matches in CSV, {} with scores".format(league, len(matches), n_scores))
+
     with engine.connect() as conn:
         unfinished = conn.execute(text("""
-            SELECT m.match_id::text, ht.name, at.name
+            SELECT m.match_id::text, ht.name, at.name, m.scheduled_at
             FROM matches m
             JOIN teams ht ON ht.team_id = m.home_team_id
             JOIN teams at ON at.team_id = m.away_team_id
@@ -70,37 +77,26 @@ def backfill_league(league: str, code: str | None, engine) -> int:
               AND m.league = :league
         """), {"league": league}).fetchall()
 
-    # Build lookup: (home_canon, away_canon) -> [match_ids]
     match_lookup = {}
-    for mid, home_name, away_name in unfinished:
-        key = (canon(home_name), canon(away_name))
+    for mid, home_name, away_name, sched in unfinished:
+        key = (canon(home_name), canon(away_name), str(sched.date()))
         match_lookup.setdefault(key, []).append(mid)
 
     updated = 0
     with engine.begin() as conn:
-        for _, row in df.iterrows():
-            fthg = row.get("FTHG")
-            ftag = row.get("FTAG")
-            if pd.isna(fthg) or pd.isna(ftag):
-                continue
-
-            key = (row["home_canon"], row["away_canon"])
+        for key, score in score_map.items():
             match_ids = match_lookup.get(key)
             if not match_ids:
-                # Try reversed
-                key = (row["away_canon"], row["home_canon"])
-                match_ids = match_lookup.get(key)
-                if not match_ids:
-                    continue
-
+                continue
+            h, a = score
             for mid in match_ids:
                 conn.execute(text("""
                     UPDATE matches SET home_score = :h, away_score = :a
                     WHERE match_id = :mid AND home_score IS NULL
-                """), {"h": int(fthg), "a": int(ftag), "mid": mid})
+                """), {"h": h, "a": a, "mid": mid})
                 updated += 1
 
-    print(f"  [{league}] updated {updated} matches from {len(df)} CSV rows")
+    print("  [{}] updated {} matches".format(league, updated))
     return updated
 
 
@@ -117,23 +113,23 @@ def main():
             WHERE status = 'finished' AND home_score IS NULL
         """))
         missing = cur.fetchone()[0]
-    print(f"Finished matches missing scores: {missing}")
+    print("Finished matches missing scores: {}".format(missing))
 
     if missing == 0:
         print("Nothing to backfill.")
         return
 
     total_updated = 0
-    for league, code in LEAGUE_CODES.items():
-        print(f"Fetching {league} ({code})...")
+    for league, url in LEAGUE_URLS.items():
+        print("Fetching {}...".format(league))
         try:
-            updated = backfill_league(league, code, engine)
+            updated = backfill_league(league, url, engine)
             total_updated += updated
         except Exception as e:
-            print(f"  [{league}] error: {e}")
+            print("  [{}] error: {}".format(league, e))
         time.sleep(0.5)
 
-    print(f"\nTotal updated: {total_updated}")
+    print("\nTotal updated: {}".format(total_updated))
 
     with engine.connect() as conn:
         cur = conn.execute(text("""
@@ -141,7 +137,7 @@ def main():
             WHERE status = 'finished' AND home_score IS NULL
         """))
         still_missing = cur.fetchone()[0]
-    print(f"Still missing scores: {still_missing}")
+    print("Still missing scores: {}".format(still_missing))
 
 
 if __name__ == "__main__":
