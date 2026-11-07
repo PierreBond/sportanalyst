@@ -56,8 +56,30 @@ def add_rolling(all_g, df, prefix, window, game_side=None):
         df[dst] = df["match_id"].map(col_map[src]).fillna(0)
     return df
 
+def canon_team(n):
+    """Canonicalize team name so spelling variants map to one value.
+
+    Fixes data bug where the same club appears under multiple names
+    (e.g. "FSV Mainz 05" vs "1. FSV Mainz 05", "Bayern Munich" vs
+    "FC Bayern München"), which diluted team-specific signals: Elo and
+    LabelEncoder treated each variant as a different team.
+    """
+    import re
+    import unicodedata
+
+    n = unicodedata.normalize("NFKD", n).encode("ascii", "ignore").decode("ascii").lower().strip()
+    n = n.replace("&", " and ")
+    n = re.sub(r"[^a-z0-9\s]", " ", n)
+    n = re.sub(r"\b\d+\b", " ", n)
+    n = re.sub(r"\b(fc|sc|cf|ac|afc|ca|rb|ssc|ss|rc|rcd|sv|vfl|vfb|tsg|us|club|de|del)\b", " ", n)
+    n = n.replace("munchen", "munich").replace("internazionale", "inter").replace("rennais", "rennes")
+    return re.sub(r"\s+", " ", n).strip()
+
+
 def engineer_features(df):
     df = df.sort_values("scheduled_at").reset_index(drop=True)
+    df["home_team"] = df["home_team"].apply(canon_team)
+    df["away_team"] = df["away_team"].apply(canon_team)
     all_g = team_games_df(df)
     n = len(df)
     all_g["game_side"] = ["home"] * n + ["away"] * n
