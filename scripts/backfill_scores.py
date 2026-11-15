@@ -3,7 +3,6 @@
 Downloads the 2026-27 season JSON for each covered league, canonicalizes team names,
 and updates matches that have status='finished' but no score.
 """
-import io
 import json
 import os
 import sys
@@ -11,7 +10,6 @@ import time
 from pathlib import Path
 
 import httpx
-import pandas as pd
 from sqlalchemy import create_engine, text
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))

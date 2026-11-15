@@ -59,34 +59,59 @@ def main():
     # Runs before the preds section, which early-returns on empty data.
     try:
         open_bets = pd.read_sql(text("""
-            SELECT b.bet_id::text, b.selection, b.odds, b.stake_pct,
+            SELECT b.bet_id::text, b.match_id::text, b.selection, b.odds, b.stake_pct,
                    m.home_score, m.away_score
             FROM bets_ledger b JOIN matches m ON b.match_id = m.match_id
             WHERE b.settled_at IS NULL AND m.status IN ('FT', 'finished') AND m.home_score IS NOT NULL
         """), engine)
         settled_n = 0
+        sel_to_col = {"home_win": "home_odds", "draw": "draw_odds", "away_win": "away_odds"}
         with engine.begin() as conn:
             for _, r in open_bets.iterrows():
                 hs, aws, sel = float(r.home_score), float(r.away_score), r.selection
                 won = {"home_win": hs > aws, "draw": hs == aws, "away_win": aws > hs}[sel]
                 stake = float(r.stake_pct) / 100.0
                 pnl = stake * (float(r.odds) - 1.0) if won else -stake
+
+                # Capture closing odds for CLV calculation
+                closing_odds = None
+                clv_pct = None
+                closing_row = conn.execute(text("""
+                    SELECT home_odds, draw_odds, away_odds
+                    FROM odds_snapshots
+                    WHERE match_id = :mid
+                    ORDER BY captured_at DESC
+                    LIMIT 1
+                """), {"mid": r.match_id}).fetchone()
+                if closing_row:
+                    col = sel_to_col[sel]
+                    closing_odds = float(getattr(closing_row, col))
+                    bet_implied = 1.0 / float(r.odds)
+                    closing_implied = 1.0 / closing_odds
+                    clv_pct = round((closing_implied - bet_implied) / closing_implied, 6)
+
                 conn.execute(text("""
-                    UPDATE bets_ledger SET won = :w, pnl_pct = :p, settled_at = now()
+                    UPDATE bets_ledger SET won = :w, pnl_pct = :p, settled_at = now(),
+                                           closing_odds = :co, clv_pct = :clv
                     WHERE bet_id = :id
-                """), {"w": bool(won), "p": pnl, "id": r.bet_id})
+                """), {"w": bool(won), "p": pnl, "id": r.bet_id, "co": closing_odds, "clv": clv_pct})
                 settled_n += 1
         summary = pd.read_sql(text("""
             SELECT count(*) FILTER (WHERE settled_at IS NULL)::int AS open,
                    count(*) FILTER (WHERE settled_at IS NOT NULL)::int AS settled,
                    avg((won)::int) FILTER (WHERE settled_at IS NOT NULL) AS hit_rate,
-                   coalesce(sum(CASE WHEN settled_at IS NOT NULL THEN pnl_pct ELSE 0 END), 0) AS ret_pct
+                   coalesce(sum(CASE WHEN settled_at IS NOT NULL THEN pnl_pct ELSE 0 END), 0) AS ret_pct,
+                   avg(clv_pct) FILTER (WHERE clv_pct IS NOT NULL) AS avg_clv_pct,
+                   count(*) FILTER (WHERE clv_pct > 0 AND settled_at IS NOT NULL)::int AS clv_positive_n,
+                   count(*) FILTER (WHERE clv_pct IS NOT NULL AND settled_at IS NOT NULL)::int AS clv_n
             FROM bets_ledger
         """), engine).iloc[0]
         print("\n=== Value-bet ledger ===")
         print(f"settled {settled_n} new; ledger: open={summary['open']} settled={summary['settled']} "
               f"hit={summary['hit_rate'] if summary['hit_rate'] is not None else 'n/a'} "
-              f"bankroll_return={float(summary['ret_pct']):+.2f}%")
+              f"bankroll_return={float(summary['ret_pct']):+.2f}% "
+              f"avg_clv={float(summary['avg_clv_pct']):+.2%} "
+              f"clv_positive={summary['clv_positive_n']}/{summary['clv_n']}")
     except Exception as e:
         print(f"\n=== Value-bet ledger === unavailable: {e}")
 

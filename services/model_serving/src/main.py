@@ -1339,7 +1339,10 @@ async def _bets_ledger_stats(db: AsyncSession | None) -> dict[str, Any] | None:
             SELECT count(*) FILTER (WHERE settled_at IS NULL)::int AS open,
                    count(*) FILTER (WHERE settled_at IS NOT NULL)::int AS settled,
                    avg((won)::int) FILTER (WHERE settled_at IS NOT NULL) AS hit_rate,
-                   coalesce(sum(CASE WHEN settled_at IS NOT NULL THEN pnl_pct ELSE 0 END), 0) AS ret_pct
+                   coalesce(sum(CASE WHEN settled_at IS NOT NULL THEN pnl_pct ELSE 0 END), 0) AS ret_pct,
+                   avg(clv_pct) FILTER (WHERE clv_pct IS NOT NULL) AS avg_clv_pct,
+                   count(*) FILTER (WHERE clv_pct > 0 AND settled_at IS NOT NULL)::int AS clv_positive_n,
+                   count(*) FILTER (WHERE clv_pct IS NOT NULL AND settled_at IS NOT NULL)::int AS clv_n
             FROM bets_ledger
         """))).mappings().first()
         if r is None:
@@ -1349,6 +1352,8 @@ async def _bets_ledger_stats(db: AsyncSession | None) -> dict[str, Any] | None:
             "settled": int(r["settled"]),
             "hit_rate": round(float(r["hit_rate"]), 4) if r["hit_rate"] is not None else None,
             "bankroll_return_pct": round(float(r["ret_pct"]), 2),
+            "avg_clv_pct": round(float(r["avg_clv_pct"]) * 100, 2) if r["avg_clv_pct"] is not None else None,
+            "clv_positive_rate": round(float(r["clv_positive_n"]) / float(r["clv_n"]), 4) if r["clv_n"] and r["clv_n"] > 0 else None,
         }
     except Exception as e:
         logger.warning("bets_ledger_query_failed", error=str(e))

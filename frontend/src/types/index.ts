@@ -82,6 +82,8 @@ export interface BetsLedgerStats {
   settled: number;
   hit_rate: number | null;
   bankroll_return_pct: number;
+  avg_clv_pct: number | null;
+  clv_positive_rate: number | null;
 }
 
 export interface ModelInfo {

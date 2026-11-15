@@ -1,16 +1,14 @@
 """Final automated backfill: fuzzy match openfootball JSON against unfinished matches."""
 import json
 import os
+import re
 import sys
 import traceback
+import unicodedata
 from difflib import SequenceMatcher
-from pathlib import Path
 
 import httpx
 from sqlalchemy import create_engine, text
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from pull_odds import canon
 
 DB_URL = os.environ.get("DATABASE_URL_SYNC")
 
@@ -27,7 +25,6 @@ BASE = "https://raw.githubusercontent.com/openfootball/football.json/master/2026
 
 
 def canon_strong(n):
-    import re, unicodedata
     n = unicodedata.normalize("NFKD", n).encode("ascii", "ignore").decode("ascii").lower().strip()
     n = n.replace("&", " and ")
     n = re.sub(r"[^a-z0-9\s]", " ", n)

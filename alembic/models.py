@@ -14,7 +14,6 @@ from sqlalchemy import (
     Numeric,
     SmallInteger,
     String,
-    Text,
     UniqueConstraint,
     Uuid,
 )
@@ -217,5 +216,7 @@ class BetLedger(Base):
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     won: Mapped[bool | None] = mapped_column(Boolean)
     pnl_pct: Mapped[float | None] = mapped_column(Numeric(7, 4))
+    closing_odds: Mapped[float | None] = mapped_column(Numeric(7, 2), nullable=True)
+    clv_pct: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
 
     __table_args__ = (UniqueConstraint("match_id", "selection", "sportsbook"),)
