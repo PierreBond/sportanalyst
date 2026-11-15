@@ -133,10 +133,10 @@ export default function HomePage() {
           </p>
           <p className="text-sm text-gray-500 mt-1">
             {modelInfo?.value_bets_ledger?.settled
-              ? `Value-bet ledger (forward test): ${modelInfo.value_bets_ledger.settled} settled, ${(((modelInfo.value_bets_ledger.hit_rate ?? 0)) * 100).toFixed(0)}% hit, bankroll ${(modelInfo.value_bets_ledger.bankroll_return_pct ?? 0).toFixed(2)}%, avg CLV ${((modelInfo.value_bets_ledger.avg_clv_pct ?? 0) * 100).toFixed(1)}%`
+              ? `Value-bet ledger (discontinued): ${modelInfo.value_bets_ledger.settled} settled, ${(((modelInfo.value_bets_ledger.hit_rate ?? 0)) * 100).toFixed(0)}% hit, bankroll ${(modelInfo.value_bets_ledger.bankroll_return_pct ?? 0).toFixed(2)}%, avg CLV ${((modelInfo.value_bets_ledger.avg_clv_pct ?? 0) * 100).toFixed(1)}%`
               : modelInfo?.value_bets_ledger?.open
-                ? `Value-bet ledger (forward test): ${modelInfo.value_bets_ledger.open} open, none settled yet`
-                : "Value-bet ledger: no bets flagged yet"}
+                ? `Value-bet ledger (discontinued): ${modelInfo.value_bets_ledger.open} open, none settled`
+                : "Value-bet ledger: discontinued"}
           </p>
         </div>
       </div>

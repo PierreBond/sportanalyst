@@ -1174,29 +1174,13 @@ async def get_value_bets(
         by_day[sched.date().isoformat() if sched else "unscheduled"].append(cand)
 
     value_bets = []
-    db_now = datetime.now(timezone.utc)
     for slate in by_day.values():
         for cand in cap_slate(slate):
             sched = cand.pop("_scheduled")
-            stake_pct = cand.pop("stake_pct")
-            # ponytail: persist flagged bets for forward-testing; unique constraint
-            # dedupes so repeated GETs don't duplicate rows
-            if db is not None and sched and sched > db_now:
-                try:
-                    await db.execute(text("""
-                        INSERT INTO bets_ledger (match_id, selection, model_prob, odds, edge,
-                                                 stake_pct, sportsbook)
-                        VALUES (CAST(:mid AS uuid), :sel, :mp, :odds, :edge, :stake, :book)
-                        ON CONFLICT (match_id, selection, sportsbook) DO NOTHING
-                    """), {
-                        "mid": cand["match_id"], "sel": cand["selection"],
-                        "mp": cand["model_prob"], "odds": cand["best_odds"],
-                        "edge": cand["edge"], "stake": stake_pct * 100.0,
-                        "book": cand["sportsbook"],
-                    })
-                    await db.commit()
-                except Exception as e:
-                    logger.warning("bets_ledger_insert_failed", match_id=cand["match_id"], error=str(e))
+            cand.pop("stake_pct", None)
+            # ponytail: value-bet forward test discontinued — model accuracy
+            # (~46.64%) is below the threshold needed to beat vig consistently.
+            # Do not persist flagged bets to bets_ledger.
             value_bets.append(cand)
 
     # Try to cache, but don't fail if it's unavailable
