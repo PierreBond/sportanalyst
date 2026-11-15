@@ -1509,12 +1509,23 @@ async def fit_calibrator(request: CalibratorFitRequest) -> CalibratorFitResponse
     global _calibrator
 
     try:
-        # For now, accept the request and log it without fitting
-        # (Full calibrator.fit() has a dependency issue to debug separately)
+        raw_probs = np.array(request.probs)
+        y_true = np.array(request.labels)
+
+        calibrator = ProbabilityCalibrator()
+        calibrator.fit(raw_probs, y_true)
+
+        # Save to disk
+        calibrator_path = _calibrator_path()
+        calibrator.save(calibrator_path)
+
+        # Update global calibrator
+        _calibrator = calibrator
+
         logger.info(
-            "calibrator_fit_requested",
+            "calibrator_fit_complete",
             samples=len(request.labels),
-            detail="Calibrator endpoint received request - full fitting deferred",
+            path=str(calibrator_path),
         )
 
         return CalibratorFitResponse(status="success", samples=len(request.labels))
