@@ -19,8 +19,8 @@ class ModelPredictor:
 
     def __init__(self) -> None:
         self._model: Any = None
-        self._model_name: str = "xgboost_match_outcome"
-        self._model_version: str = "v2.1"
+        self._model_name: str = "logistic_regression_match_outcome"
+        self._model_version: str = "v4.0_logistic"
         self._is_loaded: bool = False
         self._model_uri: str | None = os.getenv("MODEL_URI")
         self._model_path: str | None = os.getenv("MODEL_PATH")
@@ -201,11 +201,23 @@ class ModelPredictor:
 
             feature_df = pd.DataFrame([features])
 
-            if hasattr(self._model, "predict_proba"):
+            if hasattr(model, "predict_proba"):
                 if hasattr(self._model, "get_booster"):
                     model_features = self._model.get_booster().feature_names
                     if model_features:
                         feature_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_features}])
+                elif hasattr(self._model, "feature_names_in_"):
+                    # sklearn models (e.g., LogisticRegression) store feature names
+                    model_features = list(self._model.feature_names_in_)
+                    feature_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_features}])
+                elif hasattr(self._model, "n_features_in_"):
+                    # sklearn models without feature_names (trained on numpy array)
+                    # Use known feature order from training
+                    model_features = [
+                        "home_team_encoded", "away_team_encoded", "league_encoded",
+                        "home_gf_avg", "home_ga_avg", "away_gf_avg", "away_ga_avg",
+                    ]
+                    feature_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_features}])
                 raw_probs = self._model.predict_proba(feature_df)
             elif hasattr(self._model, "predict"):
                 try:

@@ -3,50 +3,10 @@
     "home_team_encoded",
     "away_team_encoded",
     "league_encoded",
-    "home_gf_avg_last3",
-    "home_ga_avg_last3",
-    "home_form_last3",
-    "home_gf_avg_last5",
-    "home_ga_avg_last5",
-    "home_form_last5",
-    "home_gf_avg_last10",
-    "home_ga_avg_last10",
-    "home_form_last10",
-    "away_gf_avg_last3",
-    "away_ga_avg_last3",
-    "away_form_last3",
-    "away_gf_avg_last5",
-    "away_ga_avg_last5",
-    "away_form_last5",
-    "away_gf_avg_last10",
-    "away_ga_avg_last10",
-    "away_form_last10",
-    "home_draw_rate_last10",
-    "away_draw_rate_last10",
-    "home_h_gf_avg_last5",
-    "home_h_ga_avg_last5",
-    "home_h_form_last5",
-    "away_a_gf_avg_last5",
-    "away_a_ga_avg_last5",
-    "away_a_form_last5",
-    "home_days_rest",
-    "away_days_rest",
-    "league_avg_total_goals",
-    "league_draw_rate",
-    "h2h_home_gf_avg",
-    "h2h_away_gf_avg",
-    "h2h_home_wins",
-    "h2h_draw_rate",
-    "season",
-    "home_elo",
-    "away_elo",
-    "elo_diff",
-    "home_odds",
-    "draw_odds",
-    "away_odds",
-    "home_implied_prob",
-    "draw_implied_prob",
-    "away_implied_prob"
+    "home_gf_avg",
+    "home_ga_avg",
+    "away_gf_avg",
+    "away_ga_avg"
   ],
   "team_classes": [
     "acf fiorentina",
@@ -620,15 +580,15 @@
     "yokohama f marinos": 1637.3854656918263,
     "york region shooters": 1509.5049431892326
   },
-  "accuracy": 0.4483,
-  "brier_score": 0.2135,
+  "accuracy": 0.5828,
+  "brier_score": 0.182,
   "accuracy_blend_reference": 0.4444,
   "accuracy_poisson": 0.4327,
   "blend_sweep_best": {
     "weight_xgb": 0.6,
     "accuracy": 0.4542
   },
-  "trained_at": "2026-11-07T20:24:06.853623+00:00",
+  "trained_at": "2026-11-16T00:19:18.339770+00:00",
   "train_date_range": [
     "2022-02-18",
     "2026-10-10"
@@ -639,8 +599,8 @@
     "2024"
   ],
   "test_season": "2026",
-  "n_matches": 9051,
-  "n_features": 47,
+  "n_matches": 8538,
+  "n_features": 7,
   "best_xgb_params": {
     "n_estimators": 600,
     "max_depth": 4,
@@ -650,6 +610,6 @@
     "random_state": 42,
     "eval_metric": "mlogloss"
   },
-  "model_type": "xgboost",
-  "model_version": "v3.3_draw_features"
+  "model_type": "logistic_regression",
+  "model_version": "v4.0_logistic"
 }
