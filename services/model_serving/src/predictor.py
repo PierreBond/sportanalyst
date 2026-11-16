@@ -201,7 +201,7 @@ class ModelPredictor:
 
             feature_df = pd.DataFrame([features])
 
-            if hasattr(model, "predict_proba"):
+            if hasattr(self._model, "predict_proba"):
                 if hasattr(self._model, "get_booster"):
                     model_features = self._model.get_booster().feature_names
                     if model_features:
