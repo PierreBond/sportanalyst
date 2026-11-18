@@ -50,19 +50,79 @@ def team_games_df(df):
     all_g["is_draw"] = (all_g["scored"] == all_g["conceded"]).astype(float)
     return all_g
 
-def add_rolling(all_g, df, prefix, window, game_side=None):
+def add_rolling(all_g, df, prefix, window, side):
+    """Rolling form features for one side of every match.
+
+    `side` says which row carries the feature: "home" takes the home team's
+    row, "away" the away team's. The rolling window itself is computed over
+    every match in `all_g` for that club, so the home and the away feature
+    describe different clubs. Mapping the frame back with
+    groupby("match_id").first() alone used to return the same number for
+    both, because that frame holds the home and the away row of each match.
+    """
     g = all_g.copy()
-    if game_side:
-        g = g[g["game_side"] == game_side] if "game_side" in g.columns else g
     for col, name in [("scored", "gf_avg"), ("conceded", "ga_avg"), ("pts", "form"), ("is_draw", "draw_rate")]:
         g[f"{name}_{window}"] = g.groupby("team_key")[col].transform(
             lambda x: x.shift(1).rolling(window, min_periods=1).mean())
+    g = g[g["game_side"] == side]
     col_map = g.groupby("match_id").first().add_prefix(f"{prefix}_")
     for suffix in ["gf_avg", "ga_avg", "form", "draw_rate"]:
         src = f"{prefix}_{suffix}_{window}"
         dst = f"{prefix}_{suffix}_last{window}"
         df[dst] = df["match_id"].map(col_map[src]).fillna(0)
     return df
+
+def add_h2h_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Head-to-head features from the last five meetings of each pair.
+
+    One row per match, grouped by the unordered pair of canonical club
+    names, so the rolling window spans the last five *meetings* instead of
+    the O(n^2) filter-the-whole-frame loop this replaced -- that loop takes
+    hours once the history grows. The pair is keyed on the canonical club
+    name, which is what the serving layer groups by as well.
+    """
+    home = df["home_team"].to_numpy()
+    away = df["away_team"].to_numpy()
+    pair = pd.Series([tuple(sorted((h, a))) for h, a in zip(home, away)], index=df.index)
+    # the pair's first club is the smaller name: score it from a fixed
+    # viewpoint so the rolling window does not depend on who was at home
+    flipped = home > away
+    first_gf = np.where(flipped, df["away_score"], df["home_score"]).astype(float)
+    second_gf = np.where(flipped, df["home_score"], df["away_score"]).astype(float)
+
+    per = pd.DataFrame({
+        "match_id": df["match_id"].to_numpy(),
+        "pair": pair.to_numpy(),
+        "scheduled_at": df["scheduled_at"].to_numpy(),
+        "flipped": flipped,
+        "first_gf": first_gf,
+        "second_gf": second_gf,
+        "first_win": (first_gf > second_gf).astype(float),
+        "second_win": (second_gf > first_gf).astype(float),
+        "draw": (first_gf == second_gf).astype(float),
+    })
+    per = per.sort_values(["pair", "scheduled_at"], kind="mergesort")
+    roll = per.groupby("pair")[["first_gf", "second_gf", "first_win", "second_win", "draw"]].transform(
+        lambda s: s.shift(1).rolling(5, min_periods=1).mean())
+
+    # the current match's home club is the pair's first club when not flipped
+    home_gf = np.where(per["flipped"], roll["second_gf"], roll["first_gf"])
+    away_gf = np.where(per["flipped"], roll["first_gf"], roll["second_gf"])
+    home_win = np.where(per["flipped"], roll["second_win"], roll["first_win"])
+
+    out = pd.DataFrame({
+        "match_id": per["match_id"].to_numpy(),
+        "h2h_home_gf_avg": home_gf,
+        "h2h_away_gf_avg": away_gf,
+        "h2h_home_wins": home_win,
+        "h2h_draw_rate": roll["draw"].to_numpy(),
+    }).set_index("match_id")
+    df["h2h_home_gf_avg"] = df["match_id"].map(out["h2h_home_gf_avg"]).fillna(0.0)
+    df["h2h_away_gf_avg"] = df["match_id"].map(out["h2h_away_gf_avg"]).fillna(0.0)
+    df["h2h_home_wins"] = df["match_id"].map(out["h2h_home_wins"]).fillna(0.5)
+    df["h2h_draw_rate"] = df["match_id"].map(out["h2h_draw_rate"]).fillna(0.26)
+    return df
+
 
 def canon_team(n):
     """Canonicalize team name so spelling variants map to one value.
@@ -81,14 +141,14 @@ def engineer_features(df):
     df["away_team"] = df["away_team"].apply(canon_team)
     all_g = team_games_df(df)
     for w in [3, 5, 10]:
-        df = add_rolling(all_g, df, "home", w)
-        df = add_rolling(all_g, df, "away", w)
+        df = add_rolling(all_g, df, "home", w, "home")
+        df = add_rolling(all_g, df, "away", w, "away")
     home_only = all_g[all_g["game_side"] == "home"].copy()
-    df = add_rolling(home_only, df, "home_h", 5)
-    df = add_rolling(home_only, df, "away_h", 5)
+    df = add_rolling(home_only, df, "home_h", 5, "home")
+    df = add_rolling(home_only, df, "away_h", 5, "away")
     away_only = all_g[all_g["game_side"] == "away"].copy()
-    df = add_rolling(away_only, df, "home_a", 5)
-    df = add_rolling(away_only, df, "away_a", 5)
+    df = add_rolling(away_only, df, "home_a", 5, "home")
+    df = add_rolling(away_only, df, "away_a", 5, "away")
     for side, team_col in [("home", "home_team"), ("away", "away_team")]:
         last_date = df.groupby(team_col)["scheduled_at"].shift(1)
         df[f"{side}_days_rest"] = (df["scheduled_at"] - last_date).dt.days.fillna(7).clip(1, 30)
@@ -101,22 +161,7 @@ def engineer_features(df):
     df["league_draw_rate"] = df.groupby("league")["_is_draw"].transform(
         lambda x: x.shift(1).expanding().mean()).fillna(0.26)
     df = df.drop(columns=["_is_draw"])
-    h2h_rows = []
-    for _, row in df.iterrows():
-        h2h = df[((df["home_team_id"] == row["home_team_id"]) & (df["away_team_id"] == row["away_team_id"]) |
-                  (df["home_team_id"] == row["away_team_id"]) & (df["away_team_id"] == row["home_team_id"]))]
-        h2h = h2h[h2h["scheduled_at"] < row["scheduled_at"]].tail(5)
-        if len(h2h) > 0:
-            hg = h2h.apply(lambda r: r["home_score"] if r["home_team_id"] == row["home_team_id"] else r["away_score"], axis=1)
-            ag = h2h.apply(lambda r: r["away_score"] if r["home_team_id"] == row["home_team_id"] else r["home_score"], axis=1)
-            h2h_rows.append({"match_id": row["match_id"], "h2h_home_gf_avg": hg.mean(), "h2h_away_gf_avg": ag.mean(),
-                             "h2h_home_wins": (hg > ag).mean(), "h2h_draw_rate": (hg == ag).mean()})
-        else:
-            h2h_rows.append({"match_id": row["match_id"], "h2h_home_gf_avg": 0, "h2h_away_gf_avg": 0,
-                             "h2h_home_wins": 0.5, "h2h_draw_rate": 0.26})
-    h2h_df = pd.DataFrame(h2h_rows).set_index("match_id")
-    for c in h2h_df.columns:
-        df[c] = df["match_id"].map(h2h_df[c]).fillna(0)
+    add_h2h_features(df)
     elo, elo_rows = {}, []
     for _, row in df.iterrows():
         ht, at = row["home_team"], row["away_team"]

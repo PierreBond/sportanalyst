@@ -734,7 +734,6 @@ SQL_H2H = """
         AVG(CASE
             WHEN (home_team_id IN :htids AND home_score > away_score)
               OR (away_team_id IN :htids AND away_score > home_score) THEN 1.0
-            WHEN home_score = away_score THEN 0.5
             ELSE 0.0 END) AS h_win_rate,
         AVG(CASE WHEN home_score = away_score THEN 1.0 ELSE 0.0 END) AS h_draw_rate
     FROM h2h

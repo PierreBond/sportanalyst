@@ -103,6 +103,36 @@ TEAM_SPECIAL = {
 }
 
 
+# Clubs the two data providers store under different official names, so the
+# canonicalizer lands them in two classes and each half only sees half of the
+# club's matches. The class that holds the history wins: a fixture stored
+# under the thin name then gets the full sample. Without this, PSV was
+# served an Elo of 1549 instead of 1797.
+CANON_FIX = {
+    "acf fiorentina": "fiorentina",
+    "aj auxerre": "auxerre",
+    "as monaco": "monaco",
+    "az": "az alkmaar",
+    "cr flamengo": "flamengo",
+    "cr vasco da gama": "vasco da gama",
+    "deportivo alaves": "alaves",
+    "es troyes": "estac troyes",
+    "mineiro": "atletico mg",
+    "nec": "nec nijmegen",
+    "olympique lyonnais": "lyon",
+    "olympique marseille": "marseille",
+    "ogc nice": "nice",
+    "paranaense": "atletico paranaense",
+    "paris": "paris saint germain",
+    "psv": "psv eindhoven",
+    "racing lens": "lens",
+    "rayo vallecano madrid": "rayo vallecano",
+    "sbv excelsior": "excelsior",
+    "se palmeiras": "palmeiras",
+    "stade rennes": "rennes",
+}
+
+
 def remove_accents(text: str) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
 
@@ -135,9 +165,15 @@ def canon_team(name: str) -> str:
     n = re.sub(r"\s+", " ", n).strip()
     for token in CLUB_TOKENS.split("|"):
         candidate = re.sub(rf"\b{token}\b", " ", n).strip()
-        if candidate:
-            n = candidate
-    return re.sub(r"\s+", " ", n).strip()
+        if not candidate:
+            continue
+        # Dropping the token must not leave a meaningless fragment: "Barcelona
+        # B" became "b", "La Coruna" became "la", "Man United" became "man".
+        if " " not in candidate and len(candidate) < 4:
+            continue
+        n = candidate
+    n = re.sub(r"\s+", " ", n).strip()
+    return CANON_FIX.get(n, n)
 
 
 def resolve_team_name(db_name: str, known: set[str]) -> str:
