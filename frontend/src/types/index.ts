@@ -37,6 +37,8 @@ export interface ValueBet {
   odds_captured_at?: string | null;
   raw_implied_prob?: number;
   prices?: { home_win: number; draw: number; away_win: number };
+  price_books?: { home_win?: string; draw?: string; away_win?: string };
+  reference_sportsbook?: string;
   model_probs?: { home_win: number; draw: number; away_win: number };
   fair_probs?: {
     home_win: number | null;

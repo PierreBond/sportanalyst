@@ -116,6 +116,71 @@ def remove_vig(
     return result[0], result[1], None
 
 
+SELECTION_ODDS_COLUMNS = {
+    "home_win": "home_odds",
+    "draw": "draw_odds",
+    "away_win": "away_odds",
+}
+
+
+def overround(home_odds: float, away_odds: float, draw_odds: float | None = None) -> float:
+    """Sum of the implied probabilities: the book's margin.
+
+    The sharpest book is the one with the lowest overround, and its
+    de-vigged probabilities are the best estimate of what the market thinks.
+    """
+    raw = [1.0 / home_odds, 1.0 / away_odds]
+    if draw_odds is not None and draw_odds > 1.0:
+        raw.append(1.0 / draw_odds)
+    return sum(raw)
+
+
+def best_available_prices(
+    books: list[dict],
+) -> tuple[dict[str, float], dict[str, str], dict | None]:
+    """Best price per outcome across books, and the sharpest reference book.
+
+    Args:
+        books: Price rows of one fixture at one snapshot, one per sportsbook,
+            each with 'sportsbook', 'home_odds', 'draw_odds' and 'away_odds'.
+
+    Returns:
+        (prices, books_by_outcome, reference). `prices` holds the highest
+        odds on offer for each outcome, `books_by_outcome` the book offering
+        that price, and `reference` the sharpest row -- the one whose
+        de-vigged probabilities the model is compared with.
+    """
+    prices: dict[str, float] = {}
+    books_by_outcome: dict[str, str] = {}
+    reference: dict | None = None
+    reference_key: tuple[int, float, str] | None = None
+
+    for row in books:
+        odds = {
+            selection: float(row.get(column) or 0.0)
+            for selection, column in SELECTION_ODDS_COLUMNS.items()
+        }
+        if odds["home_win"] <= 1.0 or odds["away_win"] <= 1.0:
+            continue
+        has_draw = odds["draw"] > 1.0
+        # a 3-way book is preferred for the reference: a 2-way overround is
+        # not comparable with a 3-way one
+        key = (
+            0 if has_draw else 1,
+            overround(odds["home_win"], odds["away_win"], odds["draw"] if has_draw else None),
+            str(row.get("sportsbook") or ""),
+        )
+        if reference_key is None or key < reference_key:
+            reference_key = key
+            reference = row
+        for selection, odd in odds.items():
+            if odd > prices.get(selection, 0.0):
+                prices[selection] = odd
+                books_by_outcome[selection] = str(row.get("sportsbook") or "unknown")
+
+    return prices, books_by_outcome, reference
+
+
 class BettingEngine:
     """Engine for detecting value bets and calculating stakes."""
 

@@ -29,6 +29,7 @@ interface Leg {
   market: number | null;
   edge: number | null;
   flagged: boolean;
+  book: string;
 }
 
 function legsFor(bet: ValueBet): Leg[] {
@@ -45,6 +46,7 @@ function legsFor(bet: ValueBet): Leg[] {
         market,
         edge: market === null ? null : model - market,
         flagged: bet.selection === key,
+        book: bet.price_books?.[key] ?? bet.sportsbook,
       };
     }).filter((leg) => leg.odds > 1);
   }
@@ -58,6 +60,7 @@ function legsFor(bet: ValueBet): Leg[] {
       market: bet.implied_prob,
       edge: bet.edge,
       flagged: true,
+      book: bet.sportsbook,
     },
   ];
 }
@@ -139,7 +142,7 @@ export default function ValueBetsPage() {
     <div className="animate-rise">
       <SectionHeader
         title="Model vs market"
-        description="Every price the model disagrees with, on the last captured odds snapshot. Edge is the model probability minus the market probability with the bookmaker margin removed."
+        description="Every price the model disagrees with, on the last captured odds snapshot. The price is the best one on offer across the books captured; the market probability is the sharpest book's, with the bookmaker margin removed."
         actions={
           <DataSourceBadge
             label="the-odds-api"
@@ -278,6 +281,9 @@ export default function ValueBetsPage() {
                       <span className="text-[11px] text-ink-mute lg:hidden">{leg.label}</span>
                       <span className="tnum font-mono text-[15px] text-ink">
                         {leg.odds.toFixed(2)}
+                        <span className="ml-1 text-[10px] font-normal text-ink-mute">
+                          {leg.book}
+                        </span>
                       </span>
                     </p>
                     <p className="tnum mt-1 font-mono text-[11px] text-ink-soft">
@@ -308,6 +314,12 @@ export default function ValueBetsPage() {
                   <p className="tnum mt-1 font-mono text-[11px] text-ink-mute">
                     stake {bet.kelly_stake_pct.toFixed(2)}%
                   </p>
+                  {bet.reference_sportsbook &&
+                  bet.reference_sportsbook !== bet.sportsbook ? (
+                    <p className="mt-1 font-mono text-[11px] text-ink-mute">
+                      market ref {bet.reference_sportsbook}
+                    </p>
+                  ) : null}
                 </div>
               </li>
             ))}

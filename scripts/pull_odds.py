@@ -97,7 +97,7 @@ def main():
         api_matches = r.json()
         unmatched = []
         for mid, home_name, away_name, sched in matches:
-            best_h, best_d, best_a, best_sb = None, None, None, None
+            books = []
             for am in api_matches:
                 if not teams_match(home_name, away_name, am.get("home_team",""), am.get("away_team","")):
                     continue
@@ -108,11 +108,14 @@ def main():
                 am_date = am.get("commence_time", "")[:10]
                 if not am_date or abs((datetime.fromisoformat(am_date).date() - sched.date()).days) > 7:
                     continue
-                # one sane book per event (Pinnacle first). min-per-leg across
-                # books picked up Betfair junk rows (1.1/1.13) and produced
-                # odds no single book offers.
-                for bm in sorted(am.get("bookmakers", []),
-                                 key=lambda b: b.get("title") != "Pinnacle"):
+                # every sane book is kept, not just the first one: the best
+                # price across books is the one free edge available, and the
+                # sharpest book gives the reference probability. One book per
+                # event (Pinnacle first) meant the other prices were thrown
+                # away. min-per-leg across books picked up Betfair junk rows
+                # (1.1/1.13) and produced odds no single book offers.
+                for bm in am.get("bookmakers", []):
+                    title = bm.get("title", "unknown")
                     for mk in bm.get("markets", []):
                         if mk.get("key") != "h2h":
                             continue
@@ -127,25 +130,21 @@ def main():
                         # rejects exchange placeholders like 1000/1000/1000
                         s = 1.0 / h_odd + 1.0 / d_odd + 1.0 / a_odd
                         if 0.95 <= s <= 1.15:
-                            best_h, best_d, best_a = h_odd, d_odd, a_odd
-                            best_sb = bm.get("title", "unknown")
+                            books.append((title, float(h_odd), float(d_odd), float(a_odd)))
                             break
-                    if best_h is not None:
-                        break
-                if best_h is not None:
-                    break
 
-            if best_h:
+            if books:
                 with db.connect() as conn:
-                    conn.execute(text("""
-                        INSERT INTO odds_snapshots (snapshot_id, match_id, sportsbook, market_type,
-                            home_odds, draw_odds, away_odds, captured_at)
-                        VALUES (:s, :mid, :sb, 'h2h', :h, :d, :a, :c)
-                        ON CONFLICT (match_id, sportsbook, market_type, captured_at) DO NOTHING
-                    """), {"s": uuid4(), "mid": mid, "sb": best_sb, "h": best_h,
-                           "d": best_d, "a": best_a, "c": now_dt})
+                    for title, h_odd, d_odd, a_odd in books:
+                        result = conn.execute(text("""
+                            INSERT INTO odds_snapshots (snapshot_id, match_id, sportsbook, market_type,
+                                home_odds, draw_odds, away_odds, captured_at)
+                            VALUES (:s, :mid, :sb, 'h2h', :h, :d, :a, :c)
+                            ON CONFLICT (match_id, sportsbook, market_type, captured_at) DO NOTHING
+                        """), {"s": uuid4(), "mid": mid, "sb": title, "h": h_odd,
+                               "d": d_odd, "a": a_odd, "c": now_dt})
+                        inserted += result.rowcount
                     conn.commit()
-                inserted += 1
             else:
                 unmatched.append(f"{home_name} vs {away_name}")
 

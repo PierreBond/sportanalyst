@@ -8,6 +8,7 @@ from sklearn.metrics import log_loss
 from services.model_serving.src.betting import (
     BettingEngine,
     BetSelection,
+    best_available_prices,
     cap_slate,
     implied_probability,
     kelly_fraction,
@@ -134,6 +135,56 @@ class TestBettingEngine:
         engine = BettingEngine()
         clv = engine.calculate_closing_line_value(0.55, 2.0)
         assert clv == pytest.approx(0.05, abs=0.01)
+
+
+class TestBestAvailablePrices:
+    """Tests for picking the best price across books and the sharpest one."""
+
+    @staticmethod
+    def _book(name: str, home: float, draw: float, away: float) -> dict:
+        return {
+            "sportsbook": name,
+            "home_odds": home,
+            "draw_odds": draw,
+            "away_odds": away,
+        }
+
+    def test_picks_the_best_price_per_outcome(self) -> None:
+        prices, books, reference = best_available_prices([
+            self._book("Pinnacle", 2.10, 3.40, 3.60),
+            self._book("Bet365", 2.30, 3.30, 3.10),
+            self._book("William Hill", 2.05, 3.50, 3.80),
+        ])
+        assert prices["home_win"] == 2.30
+        assert books["home_win"] == "Bet365"
+        assert prices["away_win"] == 3.80
+        assert books["away_win"] == "William Hill"
+
+    def test_reference_is_the_sharpest_book(self) -> None:
+        # Pinnacle has the lowest overround: 1/2.10+1/3.40+1/3.60 = 1.036
+        # Bet365 has 1/2.30+1/3.30+1/3.10 = 1.086
+        _, _, reference = best_available_prices([
+            self._book("Pinnacle", 2.10, 3.40, 3.60),
+            self._book("Bet365", 2.30, 3.30, 3.10),
+        ])
+        assert reference is not None
+        assert reference["sportsbook"] == "Pinnacle"
+
+    def test_ignores_rows_without_a_price(self) -> None:
+        prices, books, reference = best_available_prices([
+            self._book("Broken", 0.0, 3.40, 3.60),
+            self._book("Pinnacle", 2.10, 3.40, 3.60),
+        ])
+        assert prices["home_win"] == 2.10
+        assert books["home_win"] == "Pinnacle"
+        assert reference is not None
+        assert reference["sportsbook"] == "Pinnacle"
+
+    def test_no_usable_books(self) -> None:
+        prices, books, reference = best_available_prices([self._book("Broken", 0.0, 0.0, 0.0)])
+        assert prices == {}
+        assert books == {}
+        assert reference is None
 
 
 class TestProbabilityCalibrator:

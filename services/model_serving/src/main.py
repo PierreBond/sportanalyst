@@ -35,6 +35,7 @@ from sports_common.team_map import resolve_team_name as _resolve_team_name
 try:
     from .betting import (
         BettingEngine,
+        best_available_prices,
         cap_slate,
         kelly_fraction,
         remove_vig,
@@ -48,6 +49,7 @@ try:
 except ImportError:
     from betting import (
         BettingEngine,
+        best_available_prices,
         cap_slate,
         kelly_fraction,
         remove_vig,
@@ -1146,8 +1148,11 @@ async def get_value_bets(
     rows: list[dict[str, Any]] = []
     if db is not None:
         try:
+            # Every book at the latest snapshot of each fixture: the sharpest
+            # book gives the market probability the model is compared with,
+            # and the best price across books is what a bet actually costs.
             base_sql = """
-                SELECT DISTINCT ON (os.match_id)
+                SELECT
                     m.match_id::text AS match_id,
                     ht.name AS home_team,
                     at.name AS away_team,
@@ -1164,22 +1169,32 @@ async def get_value_bets(
                     WHERE match_id = m.match_id
                     ORDER BY predicted_at DESC LIMIT 1
                 ) p ON true
+                WHERE os.market_type = 'h2h'
+                  AND os.captured_at = (
+                      SELECT max(o2.captured_at) FROM odds_snapshots o2
+                      WHERE o2.match_id = os.match_id AND o2.market_type = 'h2h'
+                  )
             """
-            # ponytail: DISTINCT ON needs matching ORDER BY to pick latest snapshot
             if date:
-                q = text(base_sql + " WHERE DATE(m.scheduled_at) = DATE(:dt)"
-                         " ORDER BY os.match_id, os.captured_at DESC")
+                q = text(base_sql + " AND DATE(m.scheduled_at) = DATE(:dt)")
                 result = await db.execute(q, {"dt": date})
             else:
-                q = text(base_sql + " WHERE m.scheduled_at >= NOW() - INTERVAL '1 day'"
-                         " ORDER BY os.match_id, os.captured_at DESC")
+                q = text(base_sql + " AND m.scheduled_at >= NOW() - INTERVAL '1 day'")
                 result = await db.execute(q)
             rows = [dict(r._mapping) for r in result.all()]
         except Exception as e:
             logger.warning("value_bets_query_failed", error=str(e))
 
-    candidates: list[dict[str, Any]] = []
+    books_by_match: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
+        books_by_match.setdefault(row["match_id"], []).append(row)
+
+    candidates: list[dict[str, Any]] = []
+    for match_id, books in books_by_match.items():
+        row = books[0]
+        prices, price_books, reference = best_available_prices(books)
+        if reference is None:
+            continue
         # Live model probabilities, same path as /api/v1/predictions/{id}:
         # predict -> Poisson blend -> calibrator. The stored predictions are only
         # a fallback; they were written by an older model version, so comparing
@@ -1192,7 +1207,7 @@ async def get_value_bets(
         ]
         probs = stored_probs
         try:
-            features = await _build_features_for_match(row["match_id"], db)
+            features = await _build_features_for_match(match_id, db)
             if _predictor and _predictor.is_loaded:
                 raw_probs = [float(p) for p in _predictor.predict(features)]
                 blended = _blend_with_poisson(raw_probs, features)
@@ -1201,23 +1216,25 @@ async def get_value_bets(
                 calibrated = _calibrator.calibrate(np.array([probs]))
                 probs = [float(p) for p in calibrated[0]]
         except Exception as e:
-            logger.warning("value_bets_model_failed", match_id=row["match_id"], error=str(e))
+            logger.warning("value_bets_model_failed", match_id=match_id, error=str(e))
             probs = stored_probs
 
-        prices = {
-            "home_win": float(row["home_odds"]) if row["home_odds"] else 0.0,
-            "draw": float(row["draw_odds"]) if row["draw_odds"] else 0.0,
-            "away_win": float(row["away_odds"]) if row["away_odds"] else 0.0,
-        }
         if prices["home_win"] <= 1.0 or prices["away_win"] <= 1.0:
             continue
-        if prices["draw"] > 1.0:
+        # The market probability comes from the sharpest book; the price is
+        # the best one on offer, which may be a different book on each side.
+        ref_prices = {
+            "home_win": float(reference["home_odds"]) if reference["home_odds"] else 0.0,
+            "draw": float(reference["draw_odds"]) if reference["draw_odds"] else 0.0,
+            "away_win": float(reference["away_odds"]) if reference["away_odds"] else 0.0,
+        }
+        if ref_prices["draw"] > 1.0:
             fair_home, fair_away, fair_draw = remove_vig(
-                prices["home_win"], prices["away_win"], prices["draw"]
+                ref_prices["home_win"], ref_prices["away_win"], ref_prices["draw"]
             )
         else:
             fair_home, fair_away, fair_draw = remove_vig(
-                prices["home_win"], prices["away_win"]
+                ref_prices["home_win"], ref_prices["away_win"]
             )
         fair_probs: dict[str, float | None] = {
             "home_win": fair_home,
@@ -1253,7 +1270,7 @@ async def get_value_bets(
             MAX_EXPOSURE_PER_MATCH,
         )
         candidates.append({
-            "match_id": row["match_id"],
+            "match_id": match_id,
             "home_team": row["home_team"],
             "away_team": row["away_team"],
             "scheduled_at": row["scheduled_at"].isoformat() if row.get("scheduled_at") else None,
@@ -1264,7 +1281,11 @@ async def get_value_bets(
             "raw_implied_prob": round(best["raw_implied"], 4),
             "edge": round(best["edge"], 4),
             "kelly_stake_pct": round(stake * 100, 2),
-            "sportsbook": row["sportsbook"],
+            # the book offering the best price for the flagged selection, and
+            # the sharpest book the market probability came from
+            "sportsbook": price_books.get(best["selection"], reference["sportsbook"]),
+            "reference_sportsbook": reference["sportsbook"],
+            "price_books": price_books,
             "odds_captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
             "prices": prices,
             "model_probs": {k: round(v, 4) for k, v in model_probs.items()},
