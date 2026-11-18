@@ -23,22 +23,37 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sports_common.db import get_db
 from sports_common.logging import setup_logging, get_logger
 from sports_common.security import setup_security
+from sports_common.team_map import canon_team as _canon_team
 from sports_common.team_map import resolve_team_name as _resolve_team_name
 
 try:
-    from .betting import BettingEngine, cap_slate, MAX_BET_ODDS
+    from .betting import (
+        BettingEngine,
+        cap_slate,
+        kelly_fraction,
+        remove_vig,
+        MAX_BET_ODDS,
+        MAX_EXPOSURE_PER_MATCH,
+    )
     from .cache import PredictionCache
     from .calibrator import ProbabilityCalibrator
     from .explainer import PredictionExplainer
     from .predictor import ModelPredictor
 except ImportError:
-    from betting import BettingEngine, cap_slate
+    from betting import (
+        BettingEngine,
+        cap_slate,
+        kelly_fraction,
+        remove_vig,
+        MAX_BET_ODDS,
+        MAX_EXPOSURE_PER_MATCH,
+    )
     from cache import PredictionCache
     from calibrator import ProbabilityCalibrator
     from explainer import PredictionExplainer
@@ -171,6 +186,10 @@ _team_to_idx: dict[str, int] = {}
 _league_to_idx: dict[str, int] = {}
 _known_team_names: set[str] = set()
 _team_elos: dict[str, float] = {}
+# Canonical club name -> every team_id that club is stored under. The same
+# club appears under several ids ("Marseille", "Olympique de Marseille"),
+# and reading one id at a time split its history and left rolling stats thin.
+_team_id_groups: dict[str, list[str]] = {}
 _model_brier_score: float | None = None
 _meta_feature_names: list[str] = []
 _blend_weight: float = 1.0
@@ -267,7 +286,7 @@ async def lifespan(app: FastAPI):
 
     _betting_engine = BettingEngine()
 
-    global _team_to_idx, _league_to_idx, _known_team_names, _team_elos, _model_brier_score, _poisson, _meta_feature_names, _blend_weight
+    global _team_to_idx, _league_to_idx, _known_team_names, _team_elos, _model_brier_score, _poisson, _meta_feature_names, _blend_weight, _team_id_groups
 
     _predictor = ModelPredictor()
     _predictor.load_model()
@@ -295,7 +314,9 @@ async def lifespan(app: FastAPI):
             _known_team_names = set(_team_to_idx.keys())
             _team_elos = {name: float(v) for name, v in meta.get("team_elos", {}).items()}
             _model_brier_score = float(meta["brier_score"]) if meta.get("brier_score") is not None else None
-            _meta_feature_names = list(meta.get("feature_names", []))
+            _meta_feature_names = list(
+                meta.get("poisson_feature_names") or meta.get("feature_names", [])
+            )
             sweep = meta.get("blend_sweep_best") or {}
             w = float(sweep.get("weight_xgb", 1.0))
             if 0.05 <= w <= 0.95:
@@ -304,6 +325,21 @@ async def lifespan(app: FastAPI):
             logger.info("feature_metadata_loaded", teams=len(_team_to_idx), leagues=len(_league_to_idx), elos=len(_team_elos))
         except Exception as e:
             logger.warning("feature_metadata_load_failed", error=str(e))
+
+    # Map every canonical club name to the team_ids it is stored under, so the
+    # rolling queries see one club's full history instead of one id's slice.
+    try:
+        async for session in get_db():
+            team_rows = (
+                await session.execute(text("SELECT team_id::text AS tid, name FROM teams"))
+            ).mappings().all()
+        groups: dict[str, list[str]] = {}
+        for row in team_rows:
+            groups.setdefault(_canon_team(row["name"]), []).append(row["tid"])
+        _team_id_groups = groups
+        logger.info("team_id_groups_loaded", clubs=len(groups))
+    except Exception as e:
+        logger.warning("team_id_groups_load_failed", error=str(e))
 
     # Poisson goal models for xG / totals / BTTS / correct-score markets
     if meta_path and meta_path.exists():
@@ -635,16 +671,16 @@ async def _fetch_match_context(
 SQL_ROLLING = """
     WITH g AS (
         SELECT scheduled_at,
-            CASE WHEN home_team_id = :tid THEN home_score ELSE away_score END AS scored,
-            CASE WHEN home_team_id = :tid THEN away_score ELSE home_score END AS conceded,
+            CASE WHEN home_team_id IN :tids THEN home_score ELSE away_score END AS scored,
+            CASE WHEN home_team_id IN :tids THEN away_score ELSE home_score END AS conceded,
             CASE
-                WHEN (home_team_id = :tid AND home_score > away_score)
-                  OR (away_team_id = :tid AND away_score > home_score) THEN 3.0
+                WHEN (home_team_id IN :tids AND home_score > away_score)
+                  OR (away_team_id IN :tids AND away_score > home_score) THEN 3.0
                 WHEN home_score = away_score THEN 1.0
                 ELSE 0.0
             END AS points
         FROM matches
-        WHERE (home_team_id = :tid OR away_team_id = :tid)
+        WHERE (home_team_id IN :tids OR away_team_id IN :tids)
           AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
     )
     SELECT AVG(scored) AS avg_scored, AVG(conceded) AS avg_conceded, AVG(points) AS avg_points,
@@ -656,7 +692,7 @@ SQL_ROLLING_SIDE = """
     WITH g AS (
         SELECT scheduled_at, home_score AS scored, away_score AS conceded,
             CASE WHEN home_score > away_score THEN 3.0 WHEN home_score = away_score THEN 1.0 ELSE 0.0 END AS points
-        FROM matches WHERE home_team_id = :tid AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
+        FROM matches WHERE home_team_id IN :tids AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
     )
     SELECT AVG(scored) AS avg_scored, AVG(conceded) AS avg_conceded, AVG(points) AS avg_points
     FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
@@ -666,7 +702,7 @@ SQL_ROLLING_SIDE_AWAY = """
     WITH g AS (
         SELECT scheduled_at, away_score AS scored, home_score AS conceded,
             CASE WHEN away_score > home_score THEN 3.0 WHEN home_score = away_score THEN 1.0 ELSE 0.0 END AS points
-        FROM matches WHERE away_team_id = :tid AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
+        FROM matches WHERE away_team_id IN :tids AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
     )
     SELECT AVG(scored) AS avg_scored, AVG(conceded) AS avg_conceded, AVG(points) AS avg_points
     FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
@@ -687,30 +723,60 @@ SQL_H2H = """
     WITH h2h AS (
         SELECT home_score, away_score, home_team_id, away_team_id, scheduled_at
         FROM matches
-        WHERE ((home_team_id = :htid AND away_team_id = :atid)
-            OR (home_team_id = :atid AND away_team_id = :htid))
+        WHERE ((home_team_id IN :htids AND away_team_id IN :atids)
+            OR (home_team_id IN :atids AND away_team_id IN :htids))
           AND scheduled_at < :md AND status = 'FT' AND home_score IS NOT NULL
         ORDER BY scheduled_at DESC LIMIT 5
     )
     SELECT
-        AVG(CASE WHEN home_team_id = :htid THEN home_score ELSE away_score END) AS h_gf,
-        AVG(CASE WHEN away_team_id = :htid THEN away_score ELSE home_score END) AS h_conceded,
+        AVG(CASE WHEN home_team_id IN :htids THEN home_score ELSE away_score END) AS h_gf,
+        AVG(CASE WHEN away_team_id IN :htids THEN away_score ELSE home_score END) AS h_conceded,
         AVG(CASE
-            WHEN (home_team_id = :htid AND home_score > away_score)
-              OR (away_team_id = :htid AND away_score > home_score) THEN 1.0
+            WHEN (home_team_id IN :htids AND home_score > away_score)
+              OR (away_team_id IN :htids AND away_score > home_score) THEN 1.0
             WHEN home_score = away_score THEN 0.5
             ELSE 0.0 END) AS h_win_rate,
         AVG(CASE WHEN home_score = away_score THEN 1.0 ELSE 0.0 END) AS h_draw_rate
     FROM h2h
 """
 
-async def _team_rolling(team_id, match_date, db, sql, w=5):
-    r = (await db.execute(text(sql), {"tid": team_id, "md": match_date, "w": w})).mappings().first()
+async def _team_rolling(team_ids, match_date, db, sql, w=5):
+    """Rolling form for a club, reading every team_id it is stored under."""
+    ids = list(team_ids)
+    if not ids:
+        return 0.0, 0.0, 0.0, 0.0
+    stmt = text(sql).bindparams(bindparam("tids", expanding=True))
+    r = (await db.execute(stmt, {"tids": ids, "md": match_date, "w": w})).mappings().first()
     if r and r["avg_scored"] is not None:
         # avg_draws only exists in SQL_ROLLING; side-specific SQLs don't select it
         draws = r["avg_draws"] if "avg_draws" in r.keys() and r["avg_draws"] is not None else 0.0
         return float(r["avg_scored"]), float(r["avg_conceded"]), float(r["avg_points"]), float(draws)
     return 0.0, 0.0, 0.0, 0.0
+
+
+def _team_ids_for(canonical_name: str, fallback_id: str | None) -> list[str]:
+    """All team_ids belonging to one club, falling back to the match's own id."""
+    ids = _team_id_groups.get(canonical_name) or []
+    if fallback_id and str(fallback_id) not in ids:
+        ids = ids + [str(fallback_id)]
+    return ids
+
+def _model_team_name(db_name: str) -> str:
+    """Match a database team name to the training-time class name.
+
+    Training keys on the canonical form; looking up the raw database name
+    missed every team and handed out the default Elo instead.
+    """
+    if not db_name:
+        return db_name
+    if db_name in _known_team_names:
+        return db_name
+    canonical = _canon_team(db_name)
+    if canonical in _known_team_names:
+        return canonical
+    resolved = _resolve_team_name(db_name, _known_team_names)
+    return resolved if resolved in _known_team_names else canonical
+
 
 async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> dict[str, float]:
     f = {k: 0.0 for k in [
@@ -751,8 +817,8 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
         match_date = r.get("scheduled_at")
         home_tid, away_tid = r.get("home_team_id"), r.get("away_team_id")
 
-        h_name = _resolve_team_name(home_team, _known_team_names)
-        a_name = _resolve_team_name(away_team, _known_team_names)
+        h_name = _model_team_name(home_team)
+        a_name = _model_team_name(away_team)
         f["home_team_encoded"] = float(_team_to_idx.get(h_name, 0))
         f["away_team_encoded"] = float(_team_to_idx.get(a_name, 0))
         f["league_encoded"] = float(_league_to_idx.get(league, 0))
@@ -766,10 +832,13 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
         if not (match_date and home_tid and away_tid):
             return f
 
+        home_ids = _team_ids_for(h_name, home_tid)
+        away_ids = _team_ids_for(a_name, away_tid)
+
         # rolling all-games: windows 3, 5, 10
         for w in [3, 5, 10]:
-            h_gf, h_ga, h_pt, h_dr = await _team_rolling(home_tid, match_date, db, SQL_ROLLING, w)
-            a_gf, a_ga, a_pt, a_dr = await _team_rolling(away_tid, match_date, db, SQL_ROLLING, w)
+            h_gf, h_ga, h_pt, h_dr = await _team_rolling(home_ids, match_date, db, SQL_ROLLING, w)
+            a_gf, a_ga, a_pt, a_dr = await _team_rolling(away_ids, match_date, db, SQL_ROLLING, w)
             f[f"home_gf_avg_last{w}"] = h_gf
             f[f"home_ga_avg_last{w}"] = h_ga
             f[f"home_form_last{w}"] = h_pt
@@ -780,23 +849,24 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
             f[f"away_draw_rate_last{w}"] = a_dr
 
         # home/away specific rolling
-        h_h_gf, h_h_ga, h_h_pt, _ = await _team_rolling(home_tid, match_date, db, SQL_ROLLING_SIDE, 5)
+        h_h_gf, h_h_ga, h_h_pt, _ = await _team_rolling(home_ids, match_date, db, SQL_ROLLING_SIDE, 5)
         f["home_h_gf_avg_last5"] = h_h_gf
         f["home_h_ga_avg_last5"] = h_h_ga
         f["home_h_form_last5"] = h_h_pt
-        a_a_gf, a_a_ga, a_a_pt, _ = await _team_rolling(away_tid, match_date, db, SQL_ROLLING_SIDE_AWAY, 5)
+        a_a_gf, a_a_ga, a_a_pt, _ = await _team_rolling(away_ids, match_date, db, SQL_ROLLING_SIDE_AWAY, 5)
         f["away_a_gf_avg_last5"] = a_a_gf
         f["away_a_ga_avg_last5"] = a_a_ga
         f["away_a_form_last5"] = a_a_pt
 
         # days since last match
-        for tid, side in [(home_tid, "home"), (away_tid, "away")]:
-            last = (await db.execute(text("""
+        for ids, side in [(home_ids, "home"), (away_ids, "away")]:
+            stmt = text("""
                 SELECT scheduled_at FROM matches
-                WHERE (home_team_id = :tid OR away_team_id = :tid)
+                WHERE (home_team_id IN :tids OR away_team_id IN :tids)
                   AND scheduled_at < :md AND status = 'FT'
                 ORDER BY scheduled_at DESC LIMIT 1
-            """), {"tid": tid, "md": match_date})).mappings().first()
+            """).bindparams(bindparam("tids", expanding=True))
+            last = (await db.execute(stmt, {"tids": ids, "md": match_date})).mappings().first()
             if last and last["scheduled_at"]:
                 days = (match_date - last["scheduled_at"]).total_seconds() / 86400
                 f[f"{side}_days_rest"] = max(1, min(30, days))
@@ -810,7 +880,15 @@ async def _build_features_for_match(match_id: str, db: AsyncSession | None) -> d
         f["league_draw_rate"] = float(ld["draw_rate"]) if ld and ld["draw_rate"] is not None else 0.26
 
         # h2h
-        hr = (await db.execute(text(SQL_H2H), {"htid": home_tid, "atid": away_tid, "md": match_date})).mappings().first()
+        h2h_stmt = text(SQL_H2H).bindparams(
+            bindparam("htids", expanding=True), bindparam("atids", expanding=True)
+        )
+        hr = (
+            await db.execute(
+                h2h_stmt,
+                {"htids": home_ids, "atids": away_ids, "md": match_date},
+            )
+        ).mappings().first()
         if hr and hr["h_gf"] is not None:
             f["h2h_home_gf_avg"] = float(hr["h_gf"])
             f["h2h_away_gf_avg"] = float(hr["h_conceded"])
@@ -1103,66 +1181,100 @@ async def get_value_bets(
 
     candidates: list[dict[str, Any]] = []
     for row in rows:
-        edge = 0.0
-        selection = "home_win"
-        raw_probs = [float(row["home_win_prob"]) if row.get("home_win_prob") else 0.0,
-                     float(row["draw_prob"]) if row.get("draw_prob") else 0.0,
-                     float(row["away_win_prob"]) if row.get("away_win_prob") else 0.0]
-        if _calibrator and _calibrator.is_fitted and sum(raw_probs) > 0:
-            h_prob, d_prob, a_prob = map(float, _calibrator.calibrate(np.array([raw_probs]))[0])
-        else:
-            h_prob, d_prob, a_prob = raw_probs
-        home_odds_f = float(row["home_odds"]) if row["home_odds"] else 0.0
-        away_odds_f = float(row["away_odds"]) if row["away_odds"] else 0.0
-        draw_odds_f = float(row["draw_odds"]) if row["draw_odds"] else 0.0
-        best_odds = max(home_odds_f, draw_odds_f, away_odds_f)
-
-        # ponytail: skip extreme longshots where model is least reliable
-        if best_odds > MAX_BET_ODDS:
-            continue
-
-        # ponytail: blend XGB with Poisson goal model to pull extreme underdog
-        # probabilities toward goal-based expectations
+        # Live model probabilities, same path as /api/v1/predictions/{id}:
+        # predict -> Poisson blend -> calibrator. The stored predictions are only
+        # a fallback; they were written by an older model version, so comparing
+        # them with today's prices produced edges that contradicted the served
+        # prediction for the same fixture.
+        stored_probs = [
+            float(row["home_win_prob"]) if row.get("home_win_prob") else 0.0,
+            float(row["draw_prob"]) if row.get("draw_prob") else 0.0,
+            float(row["away_win_prob"]) if row.get("away_win_prob") else 0.0,
+        ]
+        probs = stored_probs
         try:
             features = await _build_features_for_match(row["match_id"], db)
-            blended = _blend_with_poisson([h_prob, d_prob, a_prob], features)
-            if blended:
-                h_prob, d_prob, a_prob = blended
+            if _predictor and _predictor.is_loaded:
+                raw_probs = [float(p) for p in _predictor.predict(features)]
+                blended = _blend_with_poisson(raw_probs, features)
+                probs = list(blended) if blended else raw_probs
+            if _calibrator and _calibrator.is_fitted and sum(probs) > 0:
+                calibrated = _calibrator.calibrate(np.array([probs]))
+                probs = [float(p) for p in calibrated[0]]
         except Exception as e:
-            logger.warning("value_bets_blend_failed", match_id=row["match_id"], error=str(e))
+            logger.warning("value_bets_model_failed", match_id=row["match_id"], error=str(e))
+            probs = stored_probs
 
-        if home_odds_f > 0 and home_odds_f == float(best_odds):
-            implied_prob = round(1.0 / home_odds_f, 4)
-            model_prob = h_prob or implied_prob
-            edge = round(model_prob - implied_prob, 4)
-            selection = "home_win"
-        elif away_odds_f > 0 and away_odds_f == float(best_odds):
-            implied_prob = round(1.0 / away_odds_f, 4)
-            model_prob = a_prob or implied_prob
-            edge = round(model_prob - implied_prob, 4)
-            selection = "away_win"
+        prices = {
+            "home_win": float(row["home_odds"]) if row["home_odds"] else 0.0,
+            "draw": float(row["draw_odds"]) if row["draw_odds"] else 0.0,
+            "away_win": float(row["away_odds"]) if row["away_odds"] else 0.0,
+        }
+        if prices["home_win"] <= 1.0 or prices["away_win"] <= 1.0:
+            continue
+        if prices["draw"] > 1.0:
+            fair_home, fair_away, fair_draw = remove_vig(
+                prices["home_win"], prices["away_win"], prices["draw"]
+            )
         else:
-            implied_prob = round(1.0 / draw_odds_f, 4) if draw_odds_f else 0.0
-            model_prob = d_prob or implied_prob
-            edge = round(model_prob - implied_prob, 4)
-            selection = "draw"
+            fair_home, fair_away, fair_draw = remove_vig(
+                prices["home_win"], prices["away_win"]
+            )
+        fair_probs: dict[str, float | None] = {
+            "home_win": fair_home,
+            "draw": fair_draw,
+            "away_win": fair_away,
+        }
+        model_probs = {"home_win": probs[0], "draw": probs[1], "away_win": probs[2]}
 
-        if edge >= min_edge:
-            candidates.append({
-                "match_id": row["match_id"],
-                "home_team": row["home_team"],
-                "away_team": row["away_team"],
-                "selection": selection,
-                "model_prob": model_prob,
-                "best_odds": best_odds,
-                "implied_prob": implied_prob,
-                "edge": edge,
-                "kelly_stake_pct": round(edge * 25, 2),
-                "stake_pct": min(edge * 25, 5.0) / 100.0,
-                "sportsbook": row["sportsbook"],
-                "odds_captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
-                "_scheduled": row.get("scheduled_at"),
-            })
+        # Flag the selection with the best edge, not the longest price: the
+        # bookmaker margin is removed first, so edges stay comparable.
+        best: dict[str, Any] | None = None
+        for selection, odds in prices.items():
+            if odds <= 1.0 or odds > MAX_BET_ODDS:
+                continue
+            fair = fair_probs[selection]
+            if fair is None:
+                continue
+            edge = model_probs[selection] - fair
+            if best is None or edge > best["edge"]:
+                best = {
+                    "selection": selection,
+                    "odds": odds,
+                    "implied": fair,
+                    "raw_implied": 1.0 / odds,
+                    "model_prob": model_probs[selection],
+                    "edge": edge,
+                }
+        if best is None or best["edge"] < min_edge:
+            continue
+
+        stake = min(
+            kelly_fraction(best["model_prob"], best["odds"], 0.25),
+            MAX_EXPOSURE_PER_MATCH,
+        )
+        candidates.append({
+            "match_id": row["match_id"],
+            "home_team": row["home_team"],
+            "away_team": row["away_team"],
+            "scheduled_at": row["scheduled_at"].isoformat() if row.get("scheduled_at") else None,
+            "selection": best["selection"],
+            "model_prob": round(best["model_prob"], 4),
+            "best_odds": best["odds"],
+            "implied_prob": round(best["implied"], 4),
+            "raw_implied_prob": round(best["raw_implied"], 4),
+            "edge": round(best["edge"], 4),
+            "kelly_stake_pct": round(stake * 100, 2),
+            "sportsbook": row["sportsbook"],
+            "odds_captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
+            "prices": prices,
+            "model_probs": {k: round(v, 4) for k, v in model_probs.items()},
+            "fair_probs": {
+                k: (round(v, 4) if v is not None else None) for k, v in fair_probs.items()
+            },
+            "stake_pct": stake,
+            "_scheduled": row.get("scheduled_at"),
+        })
 
     # ponytail: per-slate caps (greedy by edge) before listing/persisting; keeps
     # the forward test to a real bankroll policy, raise caps in betting.py
@@ -1178,9 +1290,9 @@ async def get_value_bets(
         for cand in cap_slate(slate):
             sched = cand.pop("_scheduled")
             cand.pop("stake_pct", None)
-            # ponytail: value-bet forward test discontinued — model accuracy
-            # (~46.64%) is below the threshold needed to beat vig consistently.
-            # Do not persist flagged bets to bets_ledger.
+            # ponytail: value-bet forward test discontinued — held-out accuracy
+            # (see the model card) is still below what it takes to beat the vig
+            # consistently. Do not persist flagged bets to bets_ledger.
             value_bets.append(cand)
 
     # Try to cache, but don't fail if it's unavailable
@@ -1269,6 +1381,7 @@ _SETTLEMENT_SQL = text("""
                      WHEN s.id >= s.ia THEN 1 ELSE 2 END = s.outcome)::int AS mkt_hit
         FROM settled s
         LEFT JOIN predictions p ON p.match_id = s.match_id
+             AND p.model_version = :model_version
     )
     SELECT 'market' AS scope, count(*)::int AS n,
            avg(mkt_brier) AS brier, avg(mkt_hit) AS accuracy
@@ -1293,7 +1406,8 @@ async def _settlement_stats(db: AsyncSession | None) -> dict[str, Any] | None:
     if db is None:
         return None
     try:
-        result = await db.execute(_SETTLEMENT_SQL)
+        version = _predictor.model_version if _predictor else ""
+        result = await db.execute(_SETTLEMENT_SQL, {"model_version": version})
         scopes: dict[str, dict[str, Any]] = {}
         for row in result.all():
             r = row._mapping
@@ -1358,18 +1472,19 @@ async def list_models(db: AsyncSession | None = Depends(get_optional_db)) -> dic
     return {
         "models": [
             {
-                "name": "xgboost_match_outcome",
+                "name": _predictor.model_name if _predictor else meta.get("model_type", "unknown"),
                 "version": meta.get("model_version", "v3.0"),
                 "stage": "production",
                 "accuracy": meta.get("accuracy", 0.515),
                 "brier_score": meta.get("brier_score", 0.210),
+                "accuracy_base_rate": meta.get("accuracy_base_rate"),
                 "trained_at": meta.get("trained_at", "unknown"),
                 "n_matches": meta.get("n_matches", 8538),
                 "n_features": meta.get("n_features", 37),
                 "blend": {
                     "weight_xgb": meta.get("blend_sweep_best", {}).get("weight_xgb", 1.0),
                     "validation_accuracy": meta.get("blend_sweep_best", {}).get("accuracy"),
-                    "note": "weight selected on the held-out validation season; blended probs = w*XGBoost + (1-w)*Poisson goal model",
+                    "note": "weight selected on the held-out validation season; blended probs = w*logistic regression + (1-w)*Poisson goal model",
                 } if float(meta.get("blend_sweep_best", {}).get("weight_xgb", 1.0)) < 1.0 else None,
                 "settlement": await _settlement_stats(db),
                 "value_bets_ledger": await _bets_ledger_stats(db),

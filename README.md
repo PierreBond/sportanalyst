@@ -1,21 +1,34 @@
 # SportAnalyst
 
-XGBoost + Poisson ensemble model for football match outcome prediction. Trained on 8,700+ matches across 9 leagues (Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Eredivisie, J1 League, Brasileirao, MLS).
+Football match outcome prediction (home win / draw / away win) served through a
+FastAPI backend to a Next.js dashboard. Free data only: football-data.org for
+results and fixtures, the-odds-api.com for prices. Runs locally on Docker
+Compose.
 
 ## What it does
 
 - Predicts **home win / draw / away win** probabilities for upcoming fixtures
-- Uses 43 features: form stats, ELO ratings, head-to-head, rest days, league averages, and betting odds
+- Compares the served model against bookmaker prices with the margin removed
+  (`/value-bets` board), so every number on screen can be checked
 - Serves predictions via a FastAPI backend + Next.js dashboard
 
-## Model performance
+## Model
 
 | Metric | Value |
 |--------|-------|
-| Accuracy | ~49% (vs 45% baseline) |
-| Model | XGBoost + Poisson ensemble |
-| Training data | 2022-2024 seasons |
-| Test data | 2026 season |
+| Model | Logistic regression + Poisson goal models (`v4.4_logistic`) |
+| Features | 11 market-independent: Elo difference, goals scored/conceded (last 5), form, rest days, league goal average, league draw rate |
+| Training data | 2022–2024 seasons (8,538 matches, 9 leagues) |
+| Test data | 2026 season (513 matches, never used for fitting) |
+| Held-out accuracy | **measured on every retrain — see `/models`** |
+| Calibration | isotonic, fitted out-of-fold on the training seasons only |
+
+The model deliberately reads **no odds or implied probabilities**, so the board
+compares two independent estimates instead of echoing the bookmaker.
+
+Club history is keyed on a canonical club name: the same club is stored under
+several team ids in the source data, and rating one id at a time split its
+history and left its Elo unrated.
 
 ## Quick start
 
@@ -30,10 +43,26 @@ uvicorn services.model_serving.src.main:app --port 8005
 
 Dashboard: `http://localhost:3000` | API: `http://localhost:8005`
 
+## Retraining
+
+```bash
+python scripts/retrain_logreg.py
+```
+
+Rewrites `models/predictor.joblib`, `models/poisson.joblib`,
+`models/calibrator.json` and `models/predictor_metadata.json`, and prints the
+held-out accuracy, Brier score and base rate it measured on the untouched
+season. Rebuild the backend image afterwards so the container serves the new
+artifacts.
+
+Bump `model_version` in `scripts/retrain_logreg.py` when you retrain: the batch
+prediction upsert only replaces a stored row when the model version differs,
+so a reused version leaves predictions from the previous artifact in the table.
+
 ## Project structure
 
 ```
-libs/sports_common/    Shared utilities (DB config, models, feature engineering)
+libs/sports_common/    Shared utilities (DB config, models, team canonicalization)
 services/
   model_serving/       FastAPI backend + ML model serving
   feature_engine/      Feature computation pipeline
@@ -47,22 +76,25 @@ models/                Trained model artifacts
 
 ## API endpoints
 
-- `GET /matches/upcoming` — upcoming fixtures with predictions
-- `GET /predictions/accuracy` — model accuracy by confidence tier
-- `GET /value-bets` — odds vs model probability comparison
-- `GET /api/models` — available model versions
+- `GET /api/v1/matches/upcoming` — upcoming fixtures
+- `GET /api/v1/predictions/{match_id}` — served prediction for one fixture
+- `GET /api/v1/value-bets` — model probabilities vs sportsbook prices
+- `GET /api/v1/markets/{match_id}` — goal-model markets (xG proxy, totals, BTTS)
+- `GET /models` — served model card: version, accuracy, Brier, blend weight
 
 ## Tech stack
 
-- **ML**: XGBoost, scikit-learn, Poisson regression, SHAP
+- **ML**: scikit-learn (logistic regression, isotonic calibration), Poisson regression
 - **Backend**: FastAPI, SQLAlchemy, asyncpg, PostgreSQL
-- **Frontend**: Next.js, Tailwind CSS, Recharts
+- **Frontend**: Next.js, Tailwind CSS, self-hosted IBM Plex
 - **Infra**: Docker Compose, GitHub Actions CI/CD
-- **Data**: the-odds-api.com, football-data.org
+- **Data**: football-data.org, the-odds-api.com (free tier)
 
 ## Odds integration
 
-The model incorporates live betting odds (implied probabilities) as features. Odds are fetched from the-odds-api.com across 8 leagues. Free tier provides current odds only; historical odds accumulate over time.
+Prices come from the-odds-api.com across 8 leagues and are stored as snapshots.
+The free tier provides current odds only, so history accumulates as fixtures
+approach. Roughly 3% of upcoming fixtures carry a price at any time.
 
 ## License
 

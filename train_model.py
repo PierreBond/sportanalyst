@@ -14,6 +14,9 @@ warnings.filterwarnings("ignore")
 MODEL_DIR = Path(__file__).resolve().parent / "models"
 MODEL_DIR.mkdir(exist_ok=True)
 
+ELO_K = 32
+ELO_HOME_ADV = 100
+
 def load_data():
     engine = create_engine(os.environ["DATABASE_URL_SYNC"])
     df = pd.read_sql("""
@@ -32,10 +35,15 @@ def load_data():
     return df
 
 def team_games_df(df):
-    home = df[["match_id", "scheduled_at", "home_team_id", "home_score", "away_score"]].copy()
-    home.columns = ["match_id", "scheduled_at", "team_id", "scored", "conceded"]
-    away = df[["match_id", "scheduled_at", "away_team_id", "away_score", "home_score"]].copy()
-    away.columns = ["match_id", "scheduled_at", "team_id", "scored", "conceded"]
+    # Key on the canonical club name, not the team id: the same club is stored
+    # under several ids ("Marseille", "Olympique de Marseille"), and splitting
+    # its history across ids left both the rolling stats and the Elo thin.
+    home = df[["match_id", "scheduled_at", "home_team", "home_score", "away_score"]].copy()
+    home.columns = ["match_id", "scheduled_at", "team_key", "scored", "conceded"]
+    home["game_side"] = "home"
+    away = df[["match_id", "scheduled_at", "away_team", "away_score", "home_score"]].copy()
+    away.columns = ["match_id", "scheduled_at", "team_key", "scored", "conceded"]
+    away["game_side"] = "away"
     all_g = pd.concat([home, away]).sort_values("scheduled_at").reset_index(drop=True)
     all_g["pts"] = (all_g["scored"] > all_g["conceded"]).astype(float) * 3
     all_g["pts"] += (all_g["scored"] == all_g["conceded"]).astype(float)
@@ -47,7 +55,7 @@ def add_rolling(all_g, df, prefix, window, game_side=None):
     if game_side:
         g = g[g["game_side"] == game_side] if "game_side" in g.columns else g
     for col, name in [("scored", "gf_avg"), ("conceded", "ga_avg"), ("pts", "form"), ("is_draw", "draw_rate")]:
-        g[f"{name}_{window}"] = g.groupby("team_id")[col].transform(
+        g[f"{name}_{window}"] = g.groupby("team_key")[col].transform(
             lambda x: x.shift(1).rolling(window, min_periods=1).mean())
     col_map = g.groupby("match_id").first().add_prefix(f"{prefix}_")
     for suffix in ["gf_avg", "ga_avg", "form", "draw_rate"]:
@@ -59,21 +67,12 @@ def add_rolling(all_g, df, prefix, window, game_side=None):
 def canon_team(n):
     """Canonicalize team name so spelling variants map to one value.
 
-    Fixes data bug where the same club appears under multiple names
-    (e.g. "FSV Mainz 05" vs "1. FSV Mainz 05", "Bayern Munich" vs
-    "FC Bayern München"), which diluted team-specific signals: Elo and
-    LabelEncoder treated each variant as a different team.
+    Lives in sports_common.team_map so training and serving key on the same
+    form; the API used to look up raw database names and missed every team.
     """
-    import re
-    import unicodedata
+    from sports_common.team_map import canon_team as _canon_team
 
-    n = unicodedata.normalize("NFKD", n).encode("ascii", "ignore").decode("ascii").lower().strip()
-    n = n.replace("&", " and ")
-    n = re.sub(r"[^a-z0-9\s]", " ", n)
-    n = re.sub(r"\b\d+\b", " ", n)
-    n = re.sub(r"\b(fc|sc|cf|ac|afc|ca|rb|ssc|ss|rc|rcd|sv|vfl|vfb|tsg|us|club|de|del)\b", " ", n)
-    n = n.replace("munchen", "munich").replace("internazionale", "inter").replace("rennais", "rennes")
-    return re.sub(r"\s+", " ", n).strip()
+    return _canon_team(n)
 
 
 def engineer_features(df):
@@ -81,8 +80,6 @@ def engineer_features(df):
     df["home_team"] = df["home_team"].apply(canon_team)
     df["away_team"] = df["away_team"].apply(canon_team)
     all_g = team_games_df(df)
-    n = len(df)
-    all_g["game_side"] = ["home"] * n + ["away"] * n
     for w in [3, 5, 10]:
         df = add_rolling(all_g, df, "home", w)
         df = add_rolling(all_g, df, "away", w)
@@ -92,8 +89,8 @@ def engineer_features(df):
     away_only = all_g[all_g["game_side"] == "away"].copy()
     df = add_rolling(away_only, df, "home_a", 5)
     df = add_rolling(away_only, df, "away_a", 5)
-    for side, tid_col in [("home", "home_team_id"), ("away", "away_team_id")]:
-        last_date = df.groupby(tid_col)["scheduled_at"].shift(1)
+    for side, team_col in [("home", "home_team"), ("away", "away_team")]:
+        last_date = df.groupby(team_col)["scheduled_at"].shift(1)
         df[f"{side}_days_rest"] = (df["scheduled_at"] - last_date).dt.days.fillna(7).clip(1, 30)
     league_stats = df.groupby("league")["home_score"].agg(["count", "sum"]).join(
         df.groupby("league")["away_score"].agg("sum"))
@@ -120,10 +117,9 @@ def engineer_features(df):
     h2h_df = pd.DataFrame(h2h_rows).set_index("match_id")
     for c in h2h_df.columns:
         df[c] = df["match_id"].map(h2h_df[c]).fillna(0)
-    ELO_K, ELO_HOME_ADV = 32, 100
     elo, elo_rows = {}, []
     for _, row in df.iterrows():
-        ht, at = row["home_team_id"], row["away_team_id"]
+        ht, at = row["home_team"], row["away_team"]
         elo_h = elo.get(ht, 1500) + ELO_HOME_ADV
         elo_a = elo.get(at, 1500)
         e_h = 1 / (1 + 10 ** ((elo_a - elo_h) / 400))
@@ -136,6 +132,20 @@ def engineer_features(df):
         df[c] = df["match_id"].map(elo_df[c]).fillna(0)
     df["target"] = df.apply(lambda r: 0 if r["home_score"] > r["away_score"] else (1 if r["home_score"] == r["away_score"] else 2), axis=1)
     return df, elo_df
+
+def final_team_elos(df):
+    """Base Elo per canonical club from its last match in the frame.
+
+    These are the ratings used going into that match, so a club's final
+    training result is not reflected. The home bonus is excluded so the
+    serving layer can add it exactly once.
+    """
+    elos = {}
+    for row in df.itertuples():
+        elos[row.home_team] = row.home_elo - ELO_HOME_ADV
+        elos[row.away_team] = row.away_elo
+    return elos
+
 
 FEATURES = [
     "home_team_encoded", "away_team_encoded", "league_encoded",
@@ -220,7 +230,9 @@ def main():
 
     team_elos = {}
     for _, row in df.iterrows():
-        team_elos[row["home_team"]] = row["home_elo"]
+        # Store the base Elo: the serving layer adds the home bonus itself, so
+        # baking it in here double-counted home advantage for some clubs.
+        team_elos[row["home_team"]] = row["home_elo"] - ELO_HOME_ADV
         team_elos[row["away_team"]] = row["away_elo"]
 
     # Season-based split: train on all but most recent season, test on most recent

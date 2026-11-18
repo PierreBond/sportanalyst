@@ -107,6 +107,39 @@ def remove_accents(text: str) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
 
 
+# Tokens that carry no club identity. Removing them keeps one club in one
+# class ("Atalanta BC" / "Atalanta", "Brighton & Hove Albion FC" / "Brighton").
+# Tokens are only dropped when something is left, so "FC Barcelona" keeps
+# "barcelona" while "Espanyol de Barcelona" becomes "espanyol".
+CLUB_TOKENS = (
+    "fc|sc|cf|ac|afc|ca|rb|ssc|ss|rc|rcd|sv|vfl|vfb|tsg|us|club|de|del"
+    "|cfc|fbc|fbpa|ec|osc|sco|bc|fr|af|gf|ud"
+    "|calcio|balompie|futbol|town|united|hotspur|rotterdam|tilburg|leeuwarden"
+    "|alsace|milano|barcelona|hove|albion|paulista|coruna|and"
+)
+
+
+def canon_team(name: str) -> str:
+    """Canonicalize a club name so spelling variants map to one value.
+
+    Training and serving both key on this form. It used to live in
+    train_model.py only, which meant the API looked up raw database names and
+    missed every team, handing out the default Elo instead.
+    """
+    n = remove_accents(name).lower().strip()
+    n = n.replace("&", " and ")
+    n = re.sub(r"[^a-z0-9\s]", " ", n)
+    n = re.sub(r"\b\d+\b", " ", n)
+    n = n.replace("munchen", "munich").replace("internazionale", "inter")
+    n = n.replace("rennais", "rennes")
+    n = re.sub(r"\s+", " ", n).strip()
+    for token in CLUB_TOKENS.split("|"):
+        candidate = re.sub(rf"\b{token}\b", " ", n).strip()
+        if candidate:
+            n = candidate
+    return re.sub(r"\s+", " ", n).strip()
+
+
 def resolve_team_name(db_name: str, known: set[str]) -> str:
     """Return the model team class for a DB team name, or db_name if unknown.
 

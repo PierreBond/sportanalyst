@@ -1,225 +1,94 @@
-"""Batch predictions using trained XGBoost+Poisson model, writes to predictions table."""
-import json
+"""Write predictions for upcoming fixtures into the predictions table.
+
+This reuses the serving layer's own feature builder and model
+(services/model_serving/src/main.py) instead of keeping a second copy of the
+feature SQL, so the stored rows are exactly what the API serves.
+
+A row is only replaced when it was written by a different model version:
+within one model version the first prediction before kickoff is kept, which
+is the one an honest forward test has to judge.
+"""
+from __future__ import annotations
+
+import asyncio
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
-import joblib
-from sqlalchemy import create_engine, text
 
-# allow running without the package pip-installed (libs/ lives in the repo)
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "libs"))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "services" / "model_serving" / "src"))
-from sports_common.team_map import resolve_team_name  # noqa: E402
-from calibrator import ProbabilityCalibrator  # noqa: E402
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
-DB_URL = os.environ.get("DATABASE_URL_SYNC")
-MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
-calibrator_path = MODEL_DIR / "calibrator.json"
-_calibrator = None
-if calibrator_path.exists():
-    try:
-        _calibrator = ProbabilityCalibrator()
-        _calibrator.load(calibrator_path)
-    except Exception:
-        _calibrator = None
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "libs"))
 
-def build_features(match_row, team_idx, league_idx, elos, db):
-    mid, home, away, league, season, scheduled_at, home_tid, away_tid = match_row
-    f = {k: 0.0 for k in [
-        "home_team_encoded","away_team_encoded","league_encoded",
-        "home_gf_avg_last3","home_ga_avg_last3","home_form_last3",
-        "home_gf_avg_last5","home_ga_avg_last5","home_form_last5",
-        "home_gf_avg_last10","home_ga_avg_last10","home_form_last10",
-        "away_gf_avg_last3","away_ga_avg_last3","away_form_last3",
-        "away_gf_avg_last5","away_ga_avg_last5","away_form_last5",
-        "away_gf_avg_last10","away_ga_avg_last10","away_form_last10",
-        "home_h_gf_avg_last5","home_h_ga_avg_last5","home_h_form_last5",
-        "away_a_gf_avg_last5","away_a_ga_avg_last5","away_a_form_last5",
-        "home_days_rest","away_days_rest","league_avg_total_goals","league_draw_rate",
-        "h2h_home_gf_avg","h2h_away_gf_avg","h2h_home_wins","h2h_draw_rate","season",
-        "home_elo","away_elo","elo_diff",
-        "home_odds","draw_odds","away_odds",
-        "home_implied_prob","draw_implied_prob","away_implied_prob",
-        "home_draw_rate_last10","away_draw_rate_last10",
-    ]}
-    known = set(team_idx.keys())
-    h_name = resolve_team_name(home, known)
-    a_name = resolve_team_name(away, known)
-    f["home_team_encoded"] = float(team_idx.get(h_name, 0))
-    f["away_team_encoded"] = float(team_idx.get(a_name, 0))
-    f["league_encoded"] = float(league_idx.get(league, 0))
-    f["season"] = float(season or 2025)
-    elo_h = elos.get(h_name, 1500)
-    elo_a = elos.get(a_name, 1500)
-    f["home_elo"] = elo_h + 100
-    f["away_elo"] = elo_a
-    f["elo_diff"] = f["home_elo"] - f["away_elo"]
+from services.model_serving.src import main as ms  # noqa: E402
 
-    md = scheduled_at
-    if not home_tid or not away_tid or not md:
-        return f
+DB_URL = os.environ.get(
+    "DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/sportspred"
+)
 
-    sql_roll = """
-        WITH g AS (
-            SELECT scheduled_at,
-                CASE WHEN home_team_id=:tid THEN home_score ELSE away_score END AS scored,
-                CASE WHEN home_team_id=:tid THEN away_score ELSE home_score END AS conceded,
-                CASE WHEN (home_team_id=:tid AND home_score>away_score) OR (away_team_id=:tid AND away_score>home_score) THEN 3.0
-                     WHEN home_score=away_score THEN 1.0 ELSE 0.0 END AS points
-            FROM matches WHERE (home_team_id=:tid OR away_team_id=:tid) AND scheduled_at<:md AND status='FT' AND home_score IS NOT NULL
-        ) SELECT AVG(scored), AVG(conceded), AVG(points),
-                 AVG(CASE WHEN scored=conceded THEN 1.0 ELSE 0.0 END)
-          FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
-    """
-    sql_home = """
-        WITH g AS (
-            SELECT scheduled_at, home_score AS scored, away_score AS conceded,
-                CASE WHEN home_score>away_score THEN 3.0 WHEN home_score=away_score THEN 1.0 ELSE 0.0 END AS points
-            FROM matches WHERE home_team_id=:tid AND scheduled_at<:md AND status='FT' AND home_score IS NOT NULL
-        ) SELECT AVG(scored), AVG(conceded), AVG(points) FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
-    """
-    sql_away = """
-        WITH g AS (
-            SELECT scheduled_at, away_score AS scored, home_score AS conceded,
-                CASE WHEN away_score>home_score THEN 3.0 WHEN home_score=away_score THEN 1.0 ELSE 0.0 END AS points
-            FROM matches WHERE away_team_id=:tid AND scheduled_at<:md AND status='FT' AND home_score IS NOT NULL
-        ) SELECT AVG(scored), AVG(conceded), AVG(points) FROM (SELECT * FROM g ORDER BY scheduled_at DESC LIMIT :w) recent
-    """
-    sql_league_avg = "SELECT AVG(home_score+away_score) FROM matches WHERE league=:league AND status='FT' AND home_score IS NOT NULL"
-    sql_league_draw = "SELECT AVG(CASE WHEN home_score=away_score THEN 1.0 ELSE 0.0 END) FROM matches WHERE league=:league AND status='FT' AND home_score IS NOT NULL AND scheduled_at<:md"
-    sql_h2h = """
-        WITH h2h AS (
-            SELECT home_score, away_score, home_team_id, away_team_id FROM matches
-            WHERE ((home_team_id=:htid AND away_team_id=:atid) OR (home_team_id=:atid AND away_team_id=:htid))
-            AND scheduled_at<:md AND status='FT' AND home_score IS NOT NULL ORDER BY scheduled_at DESC LIMIT 5
-        ) SELECT AVG(CASE WHEN home_team_id=:htid2 THEN home_score ELSE away_score END) AS h_gf,
-                 AVG(CASE WHEN away_team_id=:htid2 THEN away_score ELSE home_score END) AS h_conceded,
-                 AVG(CASE WHEN (home_team_id=:htid2 AND home_score>away_score) OR (away_team_id=:htid2 AND away_score>home_score) THEN 1.0 WHEN home_score=away_score THEN 0.5 ELSE 0.0 END),
-                 AVG(CASE WHEN home_score=away_score THEN 1.0 ELSE 0.0 END)
-        FROM h2h
-    """
-    sql_last_match = """
-        SELECT scheduled_at FROM matches WHERE (home_team_id=:tid OR away_team_id=:tid) AND scheduled_at<:md AND status='FT'
-        ORDER BY scheduled_at DESC LIMIT 1
-    """
+UPCOMING_SQL = """
+    SELECT m.match_id::text AS match_id
+    FROM matches m
+    WHERE (m.status IS NULL OR m.status = 'scheduled')
+      AND m.scheduled_at >= NOW() - INTERVAL '1 day'
+      AND m.scheduled_at < NOW() + INTERVAL '34 days'
+    ORDER BY m.scheduled_at
+"""
 
-    with db.connect() as conn2:
-        for w in [3, 5, 10]:
-            for side, tid in [("home", home_tid), ("away", away_tid)]:
-                r = conn2.execute(text(sql_roll), {"tid": tid, "md": md, "w": w}).fetchone()
-                if r and r[0] is not None:
-                    f[f"{side}_gf_avg_last{w}"] = float(r[0])
-                    f[f"{side}_ga_avg_last{w}"] = float(r[1])
-                    f[f"{side}_form_last{w}"] = float(r[2])
-                    if r[3] is not None:
-                        f[f"{side}_draw_rate_last{w}"] = float(r[3])
+INSERT_SQL = """
+    INSERT INTO predictions (prediction_id, match_id, model_name, model_version,
+        predicted_at, home_win_prob, draw_prob, away_win_prob, is_live, created_at)
+    VALUES (:pid, :mid, :mn, :mv, :now, :h, :d, :a, false, :now)
+    ON CONFLICT (match_id) DO UPDATE SET
+        prediction_id = EXCLUDED.prediction_id,
+        model_name = EXCLUDED.model_name,
+        model_version = EXCLUDED.model_version,
+        predicted_at = EXCLUDED.predicted_at,
+        home_win_prob = EXCLUDED.home_win_prob,
+        draw_prob = EXCLUDED.draw_prob,
+        away_win_prob = EXCLUDED.away_win_prob
+    WHERE predictions.model_version IS DISTINCT FROM EXCLUDED.model_version
+"""
 
-        for side, tid in [("home", home_tid), ("away", away_tid)]:
-            sql_s = sql_home if side == "home" else sql_away
-            r = conn2.execute(text(sql_s), {"tid": tid, "md": md, "w": 5}).fetchone()
-            if r and r[0] is not None:
-                gf_key = f"{side}_h_gf_avg_last5" if side == "home" else f"{side}_a_gf_avg_last5"
-                ga_key = f"{side}_h_ga_avg_last5" if side == "home" else f"{side}_a_ga_avg_last5"
-                pt_key = f"{side}_h_form_last5" if side == "home" else f"{side}_a_form_last5"
-                f[gf_key] = float(r[0])
-                f[ga_key] = float(r[1])
-                f[pt_key] = float(r[2])
 
-            r2 = conn2.execute(text(sql_last_match), {"tid": tid, "md": md}).fetchone()
-            if r2 and r2[0]:
-                days = (md - r2[0]).total_seconds() / 86400
-                f[f"{side}_days_rest"] = max(1, min(30, days))
+async def run() -> None:
+    engine = create_async_engine(DB_URL)
+    async with ms.app.router.lifespan_context(ms.app):
+        Session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+        async with Session() as db:
+            match_ids = list((await db.execute(text(UPCOMING_SQL))).scalars().all())
+            model_version = ms._predictor.model_version
+            model_name = ms._predictor.model_name
+            now_dt = datetime.now(timezone.utc)
 
-        lr = conn2.execute(text(sql_league_avg), {"league": league}).fetchone()
-        if lr and lr[0]:
-            f["league_avg_total_goals"] = float(lr[0])
-        ld = conn2.execute(text(sql_league_draw), {"league": league, "md": md}).fetchone()
-        if ld and ld[0] is not None:
-            f["league_draw_rate"] = float(ld[0])
+            written = 0
+            for match_id in match_ids:
+                payload = await ms._generate_prediction(match_id, db)
+                probs = payload["probabilities"]
+                await db.execute(
+                    text(INSERT_SQL),
+                    {
+                        "pid": uuid4(),
+                        "mid": match_id,
+                        "mn": model_name,
+                        "mv": model_version,
+                        "now": now_dt,
+                        "h": round(float(probs["home_win"]), 4),
+                        "d": round(float(probs["draw"]), 4),
+                        "a": round(float(probs["away_win"]), 4),
+                    },
+                )
+                written += 1
+            await db.commit()
 
-        hr = conn2.execute(text(sql_h2h), {"htid": home_tid, "atid": away_tid, "md": md, "htid2": home_tid}).fetchone()
-        if hr and hr[0] is not None:
-            f["h2h_home_gf_avg"] = float(hr[0])
-            f["h2h_away_gf_avg"] = float(hr[1])
-            f["h2h_home_wins"] = float(hr[2])
-            f["h2h_draw_rate"] = float(hr[3]) if hr[3] is not None else 0.26
-        else:
-            f["h2h_home_wins"] = 0.5
-            f["h2h_draw_rate"] = 0.26
+    await engine.dispose()
+    print(f"{written} predictions processed (model {model_version})")
 
-        # ponytail: odds features from the-odds-api
-        odd = conn2.execute(text("""
-            SELECT home_odds, draw_odds, away_odds FROM odds_snapshots
-            WHERE match_id = :mid ORDER BY captured_at DESC LIMIT 1
-        """), {"mid": mid}).fetchone()
-        if odd and odd[0]:
-            f["home_odds"] = float(odd[0])
-            f["draw_odds"] = float(odd[1])
-            f["away_odds"] = float(odd[2])
-            inv_h = 1.0 / float(odd[0])
-            inv_d = 1.0 / float(odd[1])
-            inv_a = 1.0 / float(odd[2])
-            total = inv_h + inv_d + inv_a
-            f["home_implied_prob"] = inv_h / total
-            f["draw_implied_prob"] = inv_d / total
-            f["away_implied_prob"] = inv_a / total
-
-    return f
-
-def main():
-    db = create_engine(DB_URL)
-    meta = json.load(open(MODEL_DIR / "predictor_metadata.json"))
-    model = joblib.load(MODEL_DIR / "predictor.joblib")
-    MODEL_VERSION = meta.get("model_version", "unknown")
-    fnames = meta["feature_names"]
-    team_idx = {n: i for i, n in enumerate(meta["team_classes"])}
-    league_idx = {n: i for i, n in enumerate(meta["league_classes"])}
-    elos = meta["team_elos"]
-
-    with db.connect() as conn:
-        upcoming = conn.execute(text("""
-            SELECT m.match_id::text, ht.name, at.name, m.league, m.season, m.scheduled_at,
-                   m.home_team_id::text, m.away_team_id::text
-            FROM matches m JOIN teams ht ON m.home_team_id=ht.team_id
-            JOIN teams at ON m.away_team_id=at.team_id
-            WHERE (m.status IS NULL OR m.status='scheduled')
-            AND m.scheduled_at >= NOW() - INTERVAL '1 day'
-            AND m.scheduled_at < NOW() + INTERVAL '34 days'
-        """)).fetchall()
-
-    now_dt = datetime.now(timezone.utc)
-    ins = 0
-    for u in upcoming:
-        features = build_features(u, team_idx, league_idx, elos, db)
-        feat_df = __import__("pandas").DataFrame([{k: features.get(k, 0.0) for k in fnames}])
-        if hasattr(model, "predict_proba"):
-            raw = model.predict_proba(feat_df)
-            probs = raw[0]
-        else:
-            import xgboost as xgb
-            probs = model.predict(xgb.DMatrix(feat_df, feature_names=fnames))
-
-        if _calibrator and _calibrator.is_fitted:
-            probs = _calibrator.calibrate(raw)[0]
-
-        mid = u[0]
-        with db.connect() as conn:
-            conn.execute(text("""
-                INSERT INTO predictions (prediction_id, match_id, model_name, model_version,
-                    predicted_at, home_win_prob, draw_prob, away_win_prob, is_live, created_at)
-                VALUES (:pid,:mid,'xgboost',:mv,:now,:h,:d,:a,false,:now)
-                ON CONFLICT DO NOTHING
-            """), {"pid": uuid4(), "mv": MODEL_VERSION, "mid": mid, "now": now_dt,
-                   "h": round(float(probs[0]), 4), "d": round(float(probs[1]), 4),
-                   "a": round(float(probs[2]), 4)})
-            ins += 1
-            conn.commit()
-
-    with db.connect() as conn:
-        total = conn.execute(text("SELECT COUNT(*) FROM predictions")).scalar()
-    print(f"{ins} predictions inserted, {total} total")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(run())

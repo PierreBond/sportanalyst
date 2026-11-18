@@ -206,18 +206,24 @@ class ModelPredictor:
                     model_features = self._model.get_booster().feature_names
                     if model_features:
                         feature_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_features}])
-                elif hasattr(self._model, "feature_names_in_"):
-                    # sklearn models (e.g., LogisticRegression) store feature names
-                    model_features = list(self._model.feature_names_in_)
-                    feature_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_features}])
-                elif hasattr(self._model, "n_features_in_"):
-                    # sklearn models without feature_names (trained on numpy array)
-                    # Use known feature order from training
-                    model_features = [
-                        "home_team_encoded", "away_team_encoded", "league_encoded",
-                        "home_gf_avg", "home_ga_avg", "away_gf_avg", "away_ga_avg",
-                    ]
-                    feature_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_features}])
+                else:
+                    # sklearn models (Pipeline, LogisticRegression) store feature names
+                    model_features = getattr(self._model, "feature_names_in_", None)
+                    if model_features is None and hasattr(self._model, "steps"):
+                        model_features = getattr(
+                            self._model.steps[0][1], "feature_names_in_", None
+                        )
+                    if model_features is not None and len(model_features) > 0:
+                        model_features = list(model_features)
+                        feature_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_features}])
+                    elif hasattr(self._model, "n_features_in_"):
+                        # sklearn models without feature names (trained on numpy array)
+                        # Use known feature order from training
+                        model_features = [
+                            "home_team_encoded", "away_team_encoded", "league_encoded",
+                            "home_gf_avg", "home_ga_avg", "away_gf_avg", "away_ga_avg",
+                        ]
+                        feature_df = pd.DataFrame([{k: features.get(k, 0.0) for k in model_features}])
                 raw_probs = self._model.predict_proba(feature_df)
             elif hasattr(self._model, "predict"):
                 try:
