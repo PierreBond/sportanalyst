@@ -16,12 +16,13 @@ Compose.
 
 | Metric | Value |
 |--------|-------|
-| Model | Logistic regression + Poisson goal models (`v4.6_logistic`) |
-| Features | 11 market-independent: Elo difference, goals scored/conceded (last 5), form, rest days, league goal average, league draw rate |
-| Training data | 2005–2026 history (44,301 matches, 9 leagues) |
-| Test data | 2026 season so far (513 matches, never used for fitting) |
-| Held-out accuracy | **measured on every retrain — see `/models`** |
-| Calibration | isotonic, fitted out-of-fold on the training seasons only |
+| Model | Logistic regression + Poisson goal models (`v4.8_logistic`) |
+| Features | 11 market-independent for the outcome model: Elo difference, goals scored/conceded (last 5), form, rest days, league goal average, league draw rate |
+| Goal model | 37 features for expected goals: rolling form and goals, rest days, league averages, head-to-head, Elo. Standardised, no odds and no label-encoded club ids |
+| Training data | 2005–2026 history (45,250 matches, 9 leagues) |
+| Test data | 2026 season so far (949 matches, never used for fitting) |
+| Held-out accuracy | **measured on every retrain — see `/models`** (v4.8: 52.9%, Brier 0.1967, base rate 45.3%) |
+| Calibration | chosen out-of-fold among identity / isotonic / vector scaling; the winner is recorded in the metadata |
 
 The model deliberately reads **no odds or implied probabilities**, so the board
 compares two independent estimates instead of echoing the bookmaker.
@@ -33,8 +34,9 @@ history and left its Elo unrated.
 The retrain windows are date based, because the season labels in the source
 data span parts of two real seasons: everything before the selection window
 fits the models, the selection window (the season before the current one)
-picks the goal-model variant and the blend weight, and the current season is
-only ever used to report.
+picks the blend weight by log-loss, and the current season is only ever used
+to report. The calibration method is picked the same way, by cross-validated
+log-loss on the out-of-fold block.
 
 ### Free history
 
@@ -79,6 +81,23 @@ Bump `model_version` in `scripts/retrain_logreg.py` when you retrain: the batch
 prediction upsert only replaces a stored row when the model version differs,
 so a reused version leaves predictions from the previous artifact in the table.
 
+## Results refresh
+
+```bash
+python scripts/ingest_all_leagues.py
+```
+
+Pulls the current season's fixtures and results for the seven leagues from
+football-data.org (free tier, 10 requests/minute) and upserts them on
+`(external_id, provider)`, so re-running never duplicates a fixture. The
+`odds-refresh` container runs this before the odds pull and the prediction
+batch every 24 hours.
+
+It matters more than it looks: the model's form and Elo features come from
+results in the database, so a stale results table makes the model disagree
+with the market on stale form and the board fills up with fake "value" bets.
+Refresh the results first, then retrain.
+
 ## Project structure
 
 ```
@@ -104,7 +123,7 @@ models/                Trained model artifacts
 
 ## Tech stack
 
-- **ML**: scikit-learn (logistic regression, isotonic calibration), Poisson regression
+- **ML**: scikit-learn (logistic regression, isotonic/vector calibration), Poisson regression
 - **Backend**: FastAPI, SQLAlchemy, asyncpg, PostgreSQL
 - **Frontend**: Next.js, Tailwind CSS, self-hosted IBM Plex
 - **Infra**: Docker Compose, GitHub Actions CI/CD

@@ -13,22 +13,26 @@ from sqlalchemy import create_engine, text
 BASE = Path(__file__).resolve().parent.parent
 env_path = BASE / ".env"
 
-# Load env vars
-api_key = None
-db_url = None
-for line in env_path.read_text().splitlines():
-    line = line.strip()
-    m = re.match(r'^FOOTBALL_DATA_ORG_KEY=(.+)$', line)
-    if m: api_key = m.group(1)
-    m = re.match(r'^DATABASE_URL_SYNC=(.+)$', line)
-    if m: db_url = m.group(1)
+# Load env vars: the environment wins, the .env file is the fallback for
+# host runs (the container image has no .env).
+api_key = os.environ.get("FOOTBALL_DATA_ORG_KEY")
+db_url = os.environ.get("DATABASE_URL_SYNC")
+env_path = BASE / ".env"
+if env_path.exists():
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        m = re.match(r'^FOOTBALL_DATA_ORG_KEY=(.+)$', line)
+        if m and not api_key: api_key = m.group(1)
+        m = re.match(r'^DATABASE_URL_SYNC=(.+)$', line)
+        if m and not db_url: db_url = m.group(1)
 
 if not api_key:
-    print("FOOTBALL_DATA_ORG_KEY not found in .env"); sys.exit(1)
+    print("FOOTBALL_DATA_ORG_KEY not found in the environment or .env"); sys.exit(1)
 if not db_url:
-    print("DATABASE_URL_SYNC not found in .env"); sys.exit(1)
+    print("DATABASE_URL_SYNC not found in the environment or .env"); sys.exit(1)
 
 LEAGUES = {
+    "BSA":   "brasileirao",
     "PL":    "premier_league",
     "PD":    "la_liga",
     "BL1":   "bundesliga",
@@ -153,7 +157,12 @@ for i, (code, league_name) in enumerate(LEAGUES.items()):
                         home_halftime_score = COALESCE(EXCLUDED.home_halftime_score, matches.home_halftime_score),
                         away_halftime_score = COALESCE(EXCLUDED.away_halftime_score, matches.away_halftime_score),
                         updated_at = NOW()
-                    WHERE matches.status IN ('scheduled', 'postponed') OR matches.season != :season
+                    -- Only a final 'FT' row is frozen. The old guard also
+                    -- froze 'finished' and 'live' rows, so matches the
+                    -- provider had since played kept their stale status and
+                    -- never got their score -- 373 rows of the 2026 season
+                    -- were invisible to training and serving.
+                    WHERE matches.status <> 'FT' OR matches.season != :season
                 """), {
                     "mid": uuid4(), "eid": eid,
                     "league": m["league"], "season": m["season"], "round": m["round"],
