@@ -1483,7 +1483,7 @@ async def list_models(db: AsyncSession | None = Depends(get_optional_db)) -> dic
                 "blend": {
                     "weight_xgb": meta.get("blend_sweep_best", {}).get("weight_xgb", 1.0),
                     "validation_accuracy": meta.get("blend_sweep_best", {}).get("accuracy"),
-                    "note": "weight selected on the held-out validation season; blended probs = w*logistic regression + (1-w)*Poisson goal model",
+                    "note": "weight selected on the held-out selection window; blended probs = w*logistic regression + (1-w)*Poisson goal model",
                 } if float(meta.get("blend_sweep_best", {}).get("weight_xgb", 1.0)) < 1.0 else None,
                 "settlement": await _settlement_stats(db),
                 "value_bets_ledger": await _bets_ledger_stats(db),

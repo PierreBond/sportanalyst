@@ -16,10 +16,10 @@ Compose.
 
 | Metric | Value |
 |--------|-------|
-| Model | Logistic regression + Poisson goal models (`v4.4_logistic`) |
+| Model | Logistic regression + Poisson goal models (`v4.6_logistic`) |
 | Features | 11 market-independent: Elo difference, goals scored/conceded (last 5), form, rest days, league goal average, league draw rate |
-| Training data | 2022–2024 seasons (8,538 matches, 9 leagues) |
-| Test data | 2026 season (513 matches, never used for fitting) |
+| Training data | 2005–2026 history (44,301 matches, 9 leagues) |
+| Test data | 2026 season so far (513 matches, never used for fitting) |
 | Held-out accuracy | **measured on every retrain — see `/models`** |
 | Calibration | isotonic, fitted out-of-fold on the training seasons only |
 
@@ -29,6 +29,26 @@ compares two independent estimates instead of echoing the bookmaker.
 Club history is keyed on a canonical club name: the same club is stored under
 several team ids in the source data, and rating one id at a time split its
 history and left its Elo unrated.
+
+The retrain windows are date based, because the season labels in the source
+data span parts of two real seasons: everything before the selection window
+fits the models, the selection window (the season before the current one)
+picks the goal-model variant and the blend weight, and the current season is
+only ever used to report.
+
+### Free history
+
+```bash
+python scripts/ingest_history.py --dry-run   # report the club mapping
+python scripts/ingest_history.py             # ingest (idempotent)
+```
+
+Pulls every result from football-data.co.uk for the six European leagues from
+2005/06 to 2021/22 (35,763 matches, no account or card needed). Without it a
+promoted club has almost no history, gets the default Elo and produces the
+absurd edges on the board. The script is idempotent: matches are keyed on
+`(external_id, provider)` and any match that already exists (same league,
+date and clubs) is skipped.
 
 ## Quick start
 

@@ -49,6 +49,11 @@ from train_model import (  # noqa: E402
 
 MODEL_DIR = ROOT / "models"
 
+# How far back the selection window reaches from the report window. 18 months
+# covers the season before the current one; the database has no rows for the
+# summer before the report season, so the window is measured in days.
+SELECTION_DAYS = 540
+
 # Every name below is produced by the serving feature builder.
 LR_FEATURES = [
     "elo_diff",
@@ -142,10 +147,26 @@ def main() -> None:
     df = merge_odds(df)
     df = df.dropna(subset=["target"]).reset_index(drop=True)
 
-    seasons = sorted(df["season"].astype(str).unique())
-    test_season = seasons[-1]
-    train_seasons = [s for s in seasons if s != test_season]
-    train_mask = (df["season"].astype(str) != test_season).values
+    # The season labels in the database are not reliable -- one label spans
+    # parts of two real seasons -- so the windows are date based: the current
+    # season is reported, the season before it selects the goal-model variant
+    # and the blend weight, and everything older fits the models. Selecting on
+    # the report season is what made the old headline number optimistic.
+    dates = pd.to_datetime(df["scheduled_at"], utc=True)
+    season_str = df["season"].astype(str)
+    report_season = season_str[df["target"].notna()].max()
+    report_rows = df[season_str == report_season]
+    report_start = pd.to_datetime(report_rows["scheduled_at"], utc=True).min()
+    selection_start = report_start - pd.Timedelta(days=SELECTION_DAYS)
+    test_mask = (dates >= report_start).values
+    val_mask = ((dates >= selection_start) & (dates < report_start)).values
+    fit_mask = (dates < selection_start).values
+    # the shipped model is fitted on every match before the report window
+    train_mask = ~test_mask
+    print(f"Fit: before {selection_start.date()} ({int(fit_mask.sum())} matches)")
+    print(f"Selection: {selection_start.date()} .. {(report_start - pd.Timedelta(days=1)).date()} "
+          f"({int(val_mask.sum())} matches)")
+    print(f"Report: from {report_start.date()} ({int(test_mask.sum())} matches)")
 
     y = df["target"].astype(int).values
 
@@ -189,28 +210,29 @@ def main() -> None:
         frame = feature_frame(features)
         home_model = PoissonRegressor(alpha=0.1, max_iter=500)
         away_model = PoissonRegressor(alpha=0.1, max_iter=500)
-        home_model.fit(frame[train_mask], df.loc[train_mask, "home_score"])
-        away_model.fit(frame[train_mask], df.loc[train_mask, "away_score"])
+        home_model.fit(frame[fit_mask], df.loc[fit_mask, "home_score"])
+        away_model.fit(frame[fit_mask], df.loc[fit_mask, "away_score"])
         lam_h = home_model.predict(frame)
         lam_a = away_model.predict(frame)
         probs = goal_probabilities(lam_h, lam_a)
         goal_probs_by_variant[name] = probs
 
-        val_h_mae = mean_absolute_error(df.loc[~train_mask, "home_score"], lam_h[~train_mask])
-        val_a_mae = mean_absolute_error(df.loc[~train_mask, "away_score"], lam_a[~train_mask])
-        acc = float((probs[~train_mask].argmax(1) == y[~train_mask]).mean())
-        brier = multiclass_brier(y[~train_mask], probs[~train_mask])
+        val_h_mae = mean_absolute_error(df.loc[val_mask, "home_score"], lam_h[val_mask])
+        val_a_mae = mean_absolute_error(df.loc[val_mask, "away_score"], lam_a[val_mask])
+        acc = float((probs[val_mask].argmax(1) == y[val_mask]).mean())
+        brier = multiclass_brier(y[val_mask], probs[val_mask])
         market_free = name != "full"
         print(
             f"  goal[{name}] n_feat={len(features)} goal_mae={val_h_mae:.3f}/{val_a_mae:.3f} "
             f"acc={acc:.4f} brier={brier:.4f}{'' if market_free else ' (market-informed, not selectable)'}"
         )
         # Select on what the goal model is actually used for: 1X2 quality.
-        # Goal-count MAE barely separates the variants; accuracy does.
+        # Goal-count MAE barely separates the variants; accuracy does. Ties go
+        # to the variant with fewer features.
         if not market_free:
             continue
         score = (acc, -brier, -len(features))
-        if best_goal is None or score > best_goal[:3]:
+        if best_goal is None or score > (best_goal[0], best_goal[1], -len(best_goal[3])):
             best_goal = (acc, -brier, name, features)
 
     goal_name = best_goal[2] if best_goal else "no_market"
@@ -232,14 +254,15 @@ def main() -> None:
             ("lr", LogisticRegression(max_iter=5000, C=1.0, random_state=42)),
         ]
     )
-    model.fit(X[train_mask], y[train_mask])
-    print(f"Fitted logistic regression on {int(train_mask.sum())} matches")
+    model.fit(X[fit_mask], y[fit_mask])
+    print(f"Fitted logistic regression on {int(fit_mask.sum())} matches")
 
-    lr_val = model.predict_proba(X[~train_mask])
-    goal_val = goal_probs[~train_mask]
-    y_val = y[~train_mask]
+    lr_val = model.predict_proba(X[val_mask])
+    goal_val = goal_probs[val_mask]
+    y_val = y[val_mask]
 
-    print(f"\nValidation season {test_season} ({len(y_val)} matches)")
+    print(f"\nSelection window {selection_start.date()} .. {(report_start - pd.Timedelta(days=1)).date()} "
+          f"({len(y_val)} matches)")
     print(f"  logistic alone: acc={(lr_val.argmax(1) == y_val).mean():.4f} "
           f"brier={multiclass_brier(y_val, lr_val):.4f}")
     print(f"  goal model alone: acc={(goal_val.argmax(1) == y_val).mean():.4f} "
@@ -255,8 +278,14 @@ def main() -> None:
             best_weight, best_acc, best_brier = weight, acc, brier
     print(f"  -> blend weight {best_weight:.1f}")
 
-    # Calibrator fitted out-of-fold on the training seasons only, so the
-    # validation season stays untouched.
+    # Refit the selected models on every season before the test one, then fit
+    # the calibrator out-of-fold on those seasons. The test season is only
+    # used to report.
+    model.fit(X[train_mask], y[train_mask])
+    lam_h = poisson_home.predict(goal_frame)
+    lam_a = poisson_away.predict(goal_frame)
+    goal_probs = goal_probabilities(lam_h, lam_a)
+
     print("\nFitting calibrator out-of-fold...")
     oof = np.zeros((int(train_mask.sum()), 3))
     goal_train = goal_probs[train_mask]
@@ -272,17 +301,25 @@ def main() -> None:
     calibrator.fit(oof, y[train_mask])
     calibrator.save(MODEL_DIR / "calibrator.json")
 
-    served_val = best_weight * lr_val + (1.0 - best_weight) * goal_val
-    calibrated_val = calibrator.calibrate(served_val)
-    final_acc = float((calibrated_val.argmax(1) == y_val).mean())
-    final_brier = multiclass_brier(y_val, calibrated_val)
-    base_rate = float(np.bincount(y_val, minlength=3).max() / len(y_val))
+    lr_test = model.predict_proba(X[test_mask])
+    goal_test = goal_probs[test_mask]
+    y_test = y[test_mask]
+    served_test = best_weight * lr_test + (1.0 - best_weight) * goal_test
+    calibrated_test = calibrator.calibrate(served_test)
+    final_acc = float((calibrated_test.argmax(1) == y_test).mean())
+    final_brier = multiclass_brier(y_test, calibrated_test)
+    base_rate = float(np.bincount(y_test, minlength=3).max() / len(y_test))
 
-    print(f"\nServed model on {test_season}: accuracy={final_acc:.4f} brier={final_brier:.4f}")
+    print(f"\nServed model on the report window (from {report_start.date()}): "
+          f"accuracy={final_acc:.4f} brier={final_brier:.4f}")
     print(f"  majority-class base rate: {base_rate:.4f}")
+    print(f"  logistic alone: acc={(lr_test.argmax(1) == y_test).mean():.4f} "
+          f"brier={multiclass_brier(y_test, lr_test):.4f}")
+    print(f"  goal model alone: acc={(goal_test.argmax(1) == y_test).mean():.4f} "
+          f"brier={multiclass_brier(y_test, goal_test):.4f}")
     from sklearn.metrics import classification_report
 
-    print(classification_report(y_val, calibrated_val.argmax(1), target_names=["home_win", "draw", "away_win"]))
+    print(classification_report(y_test, calibrated_test.argmax(1), target_names=["home_win", "draw", "away_win"]))
 
     joblib.dump(model, MODEL_DIR / "predictor.joblib")
     joblib.dump({"home": poisson_home, "away": poisson_away}, MODEL_DIR / "poisson.joblib")
@@ -299,27 +336,41 @@ def main() -> None:
             # Bump on every retrain: the batch upsert only replaces stored
             # predictions when the model version differs, so a reused version
             # leaves rows from the previous artifact in the table.
-            "model_version": "v4.4_logistic",
+            "model_version": "v4.6_logistic",
             "model_type": "logistic_regression",
             "accuracy": float(round(final_acc, 4)),
             "brier_score": float(round(final_brier, 4)),
             "accuracy_base_rate": float(round(base_rate, 4)),
-            "accuracy_raw": float(round(best_acc, 4)),
-            "brier_raw": float(round(best_brier, 4)),
+            "accuracy_raw": float(
+                round(float((lr_test.argmax(1) == y_test).mean()), 4)
+            ),
+            "brier_raw": float(round(multiclass_brier(y_test, lr_test), 4)),
             "accuracy_poisson": float(
-                round(float((goal_val.argmax(1) == y_val).mean()), 4)
+                round(float((goal_test.argmax(1) == y_test).mean()), 4)
             ),
             "blend_sweep_best": {
                 "weight_xgb": float(best_weight),
                 "accuracy": float(round(best_acc, 4)),
                 "brier": float(round(best_brier, 4)),
+                "selection_window": [
+                    str(selection_start.date()),
+                    str((report_start - pd.Timedelta(days=1)).date()),
+                ],
             },
             "goal_model_variant": goal_name,
             "trained_at": pd.Timestamp.now(tz="UTC").isoformat(),
             "n_matches": int(train_mask.sum()),
             "n_features": len(LR_FEATURES),
-            "train_seasons": train_seasons,
-            "test_season": test_season,
+            "fit_until": str(selection_start.date()),
+            "selection_window": [
+                str(selection_start.date()),
+                str((report_start - pd.Timedelta(days=1)).date()),
+            ],
+            "report_window": [
+                str(report_start.date()),
+                str(dates.max().date()),
+            ],
+            "report_season": report_season,
             "train_date_range": [
                 str(df["scheduled_at"].min().date()),
                 str(df["scheduled_at"].max().date()),
