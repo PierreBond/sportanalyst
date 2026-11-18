@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.linear_model import LogisticRegression, PoissonRegressor
-from sklearn.metrics import brier_score_loss, mean_absolute_error
+from sklearn.metrics import brier_score_loss, log_loss, mean_absolute_error
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -73,6 +73,19 @@ LR_FEATURES = [
 # read the market: no odds, no implied probabilities.
 MARKET_FEATURES = {"home_odds", "draw_odds", "away_odds",
                    "home_implied_prob", "draw_implied_prob", "away_implied_prob"}
+
+# The goal model's features: rolling form and goals, rest days, league
+# averages, head-to-head and Elo. The label-encoded team and league ids are
+# left out on purpose -- an id is an arbitrary number rather than a strength,
+# and the serving layer cannot fill one correctly for a club it has never
+# seen. The season label is left out for the same reason.
+GOAL_FEATURES = [
+    f
+    for f in POISSON_FEATURES
+    if f not in MARKET_FEATURES
+    and f not in ("home_team_encoded", "away_team_encoded", "league_encoded", "season")
+]
+GOAL_VARIANT = "no_market_no_ids"
 
 
 def merge_odds(df: pd.DataFrame) -> pd.DataFrame:
@@ -133,6 +146,22 @@ def goal_probabilities(lam_h: np.ndarray, lam_a: np.ndarray) -> np.ndarray:
     return np.array([poisson_probs(lh, la) for lh, la in zip(lam_h, lam_a)])
 
 
+def goal_regressor() -> Pipeline:
+    """Poisson goal regressor for expected goals.
+
+    The goal features have wildly different scales (elo in the hundreds, form
+    in [-1, 1]). On unstandardised features the fit converges to an
+    intercept-only model -- every coefficient exactly zero -- so it predicted
+    the league average goal count for every fixture. Standardising fixes it.
+    """
+    return Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("poisson", PoissonRegressor(alpha=0.1, max_iter=500)),
+        ]
+    )
+
+
 def main() -> None:
     os.environ.setdefault(
         "DATABASE_URL_SYNC", "postgresql://user:pass@localhost:5432/sportspred"
@@ -189,60 +218,33 @@ def main() -> None:
             frame[name] = df[name].astype(float)
         return frame[features]
 
-    # --- goal models -------------------------------------------------------
+    # --- goal model --------------------------------------------------------
     # The goal model feeds both the 1X2 blend and the xG / totals / BTTS
-    # markets. The market-informed variant is measured for information only:
-    # the served model must not read the price it is later compared against.
-    goal_variants = {
-        "full": POISSON_FEATURES,
-        "no_market": [f for f in POISSON_FEATURES if f not in MARKET_FEATURES],
-        "no_market_no_enc": [
-            f
-            for f in POISSON_FEATURES
-            if f not in MARKET_FEATURES
-            and f not in ("home_team_encoded", "away_team_encoded", "season")
-        ],
-    }
-
-    best_goal: tuple[float, float, str, list[str]] | None = None
-    goal_probs_by_variant: dict[str, np.ndarray] = {}
-    for name, features in goal_variants.items():
-        frame = feature_frame(features)
-        home_model = PoissonRegressor(alpha=0.1, max_iter=500)
-        away_model = PoissonRegressor(alpha=0.1, max_iter=500)
-        home_model.fit(frame[fit_mask], df.loc[fit_mask, "home_score"])
-        away_model.fit(frame[fit_mask], df.loc[fit_mask, "away_score"])
-        lam_h = home_model.predict(frame)
-        lam_a = away_model.predict(frame)
-        probs = goal_probabilities(lam_h, lam_a)
-        goal_probs_by_variant[name] = probs
-
-        val_h_mae = mean_absolute_error(df.loc[val_mask, "home_score"], lam_h[val_mask])
-        val_a_mae = mean_absolute_error(df.loc[val_mask, "away_score"], lam_a[val_mask])
-        acc = float((probs[val_mask].argmax(1) == y[val_mask]).mean())
-        brier = multiclass_brier(y[val_mask], probs[val_mask])
-        market_free = name != "full"
-        print(
-            f"  goal[{name}] n_feat={len(features)} goal_mae={val_h_mae:.3f}/{val_a_mae:.3f} "
-            f"acc={acc:.4f} brier={brier:.4f}{'' if market_free else ' (market-informed, not selectable)'}"
-        )
-        # Select on what the goal model is actually used for: 1X2 quality.
-        # Goal-count MAE barely separates the variants; accuracy does. Ties go
-        # to the variant with fewer features.
-        if not market_free:
-            continue
-        score = (acc, -brier, -len(features))
-        if best_goal is None or score > (best_goal[0], best_goal[1], -len(best_goal[3])):
-            best_goal = (acc, -brier, name, features)
-
-    goal_name = best_goal[2] if best_goal else "no_market"
-    goal_features = goal_variants[goal_name]
-    goal_probs = goal_probs_by_variant[goal_name]
-    print(f"  -> goal model variant: {goal_name} ({len(goal_features)} features)")
-
+    # markets. Its features are the rolling form and goals, rest days, league
+    # averages, head-to-head and Elo. No odds: the served model must not read
+    # the price it is later compared against. No label-encoded team or league
+    # ids either -- an id is an arbitrary number rather than a strength, and
+    # the serving layer cannot fill one correctly for a club it has never
+    # seen (it falls back to team 0).
+    goal_features = GOAL_FEATURES
+    goal_name = GOAL_VARIANT
     goal_frame = feature_frame(goal_features)
-    poisson_home = PoissonRegressor(alpha=0.1, max_iter=500)
-    poisson_away = PoissonRegressor(alpha=0.1, max_iter=500)
+
+    fit_home = goal_regressor().fit(goal_frame[fit_mask], df.loc[fit_mask, "home_score"])
+    fit_away = goal_regressor().fit(goal_frame[fit_mask], df.loc[fit_mask, "away_score"])
+    val_lam_h = fit_home.predict(goal_frame)[val_mask]
+    val_lam_a = fit_away.predict(goal_frame)[val_mask]
+    val_goal = goal_probabilities(val_lam_h, val_lam_a)
+    val_h_mae = mean_absolute_error(df.loc[val_mask, "home_score"], val_lam_h)
+    val_a_mae = mean_absolute_error(df.loc[val_mask, "away_score"], val_lam_a)
+    print(
+        f"  goal[{goal_name}] n_feat={len(goal_features)} goal_mae={val_h_mae:.3f}/{val_a_mae:.3f} "
+        f"acc={float((val_goal.argmax(1) == y[val_mask]).mean()):.4f} "
+        f"brier={multiclass_brier(y[val_mask], val_goal):.4f}"
+    )
+
+    poisson_home = goal_regressor()
+    poisson_away = goal_regressor()
     poisson_home.fit(goal_frame[train_mask], df.loc[train_mask, "home_score"])
     poisson_away.fit(goal_frame[train_mask], df.loc[train_mask, "away_score"])
 
@@ -258,25 +260,31 @@ def main() -> None:
     print(f"Fitted logistic regression on {int(fit_mask.sum())} matches")
 
     lr_val = model.predict_proba(X[val_mask])
-    goal_val = goal_probs[val_mask]
+    goal_val = val_goal
     y_val = y[val_mask]
 
     print(f"\nSelection window {selection_start.date()} .. {(report_start - pd.Timedelta(days=1)).date()} "
           f"({len(y_val)} matches)")
     print(f"  logistic alone: acc={(lr_val.argmax(1) == y_val).mean():.4f} "
-          f"brier={multiclass_brier(y_val, lr_val):.4f}")
+          f"brier={multiclass_brier(y_val, lr_val):.4f} "
+          f"logloss={log_loss(y_val, lr_val, labels=[0, 1, 2]):.4f}")
     print(f"  goal model alone: acc={(goal_val.argmax(1) == y_val).mean():.4f} "
-          f"brier={multiclass_brier(y_val, goal_val):.4f}")
+          f"brier={multiclass_brier(y_val, goal_val):.4f} "
+          f"logloss={log_loss(y_val, goal_val, labels=[0, 1, 2]):.4f}")
 
-    best_weight, best_acc, best_brier = 1.0, -1.0, 9.9
-    for weight in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0):
+    # The blend weight is chosen by log-loss, not accuracy: accuracy throws
+    # away the probability information a bet needs, and on a selection window
+    # of a few thousand matches it is a step function that overfits.
+    best_weight, best_acc, best_brier, best_ll = 1.0, -1.0, 9.9, 9.9
+    for weight in (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0):
         probs = weight * lr_val + (1.0 - weight) * goal_val
         acc = float((probs.argmax(1) == y_val).mean())
         brier = multiclass_brier(y_val, probs)
-        print(f"  blend w={weight:.1f}: acc={acc:.4f} brier={brier:.4f}")
-        if (acc, -brier) > (best_acc, -best_brier):
-            best_weight, best_acc, best_brier = weight, acc, brier
-    print(f"  -> blend weight {best_weight:.1f}")
+        ll = log_loss(y_val, probs, labels=[0, 1, 2])
+        print(f"  blend w={weight:.1f}: acc={acc:.4f} brier={brier:.4f} logloss={ll:.4f}")
+        if ll < best_ll:
+            best_weight, best_acc, best_brier, best_ll = weight, acc, brier, ll
+    print(f"  -> blend weight {best_weight:.1f} (log-loss {best_ll:.4f})")
 
     # Refit the selected models on every season before the test one, then fit
     # the calibrator out-of-fold on those seasons. The test season is only
@@ -288,17 +296,45 @@ def main() -> None:
 
     print("\nFitting calibrator out-of-fold...")
     oof = np.zeros((int(train_mask.sum()), 3))
-    goal_train = goal_probs[train_mask]
+    # TimeSeriesSplit keeps the first block for training only, so those rows
+    # never get an out-of-fold prediction. The calibrator is fitted on the
+    # rows that do; without the mask it also sees the untouched zeros, and
+    # the log-loss of a zero probability swamps every other row.
+    oof_mask = np.zeros(int(train_mask.sum()), dtype=bool)
     splitter = TimeSeriesSplit(n_splits=5)
+    train_rows = df.loc[train_mask]
     for fold_train, fold_val in splitter.split(X[train_mask]):
         fold_model = clone(model).fit(X[train_mask].iloc[fold_train], y[train_mask][fold_train])
         fold_probs = fold_model.predict_proba(X[train_mask].iloc[fold_val])
-        oof[fold_val] = (
-            best_weight * fold_probs + (1.0 - best_weight) * goal_train[fold_val]
+        # the goal model is refitted on the fold as well, so the blend is
+        # out-of-fold for both members
+        fold_home = goal_regressor().fit(
+            goal_frame[train_mask].iloc[fold_train], train_rows.iloc[fold_train]["home_score"]
         )
+        fold_away = goal_regressor().fit(
+            goal_frame[train_mask].iloc[fold_train], train_rows.iloc[fold_train]["away_score"]
+        )
+        fold_goal = goal_probabilities(
+            fold_home.predict(goal_frame[train_mask].iloc[fold_val]),
+            fold_away.predict(goal_frame[train_mask].iloc[fold_val]),
+        )
+        oof[fold_val] = best_weight * fold_probs + (1.0 - best_weight) * fold_goal
+        oof_mask[fold_val] = True
+    print(f"  out-of-fold predictions for {int(oof_mask.sum())} of {len(oof_mask)} rows")
 
+    # The calibration method is chosen out of fold: each candidate is fitted on
+    # the first half of the out-of-fold block and scored by log-loss on the
+    # second half, and the winner is refitted on everything. On this data
+    # identity wins -- the model is already calibrated, so isotonic only adds
+    # variance.
     calibrator = ProbabilityCalibrator()
-    calibrator.fit(oof, y[train_mask])
+    oof_fit = oof[oof_mask]
+    y_fit = y[train_mask][oof_mask]
+    ll_before = log_loss(y_fit, oof_fit, labels=[0, 1, 2])
+    calibrator.fit(oof_fit, y_fit, method="auto")
+    ll_after = log_loss(y_fit, calibrator.calibrate(oof_fit), labels=[0, 1, 2])
+    print(f"  calibration method: {calibrator.method} "
+          f"(log-loss {ll_before:.4f} -> {ll_after:.4f})")
     calibrator.save(MODEL_DIR / "calibrator.json")
 
     lr_test = model.predict_proba(X[test_mask])
@@ -336,8 +372,9 @@ def main() -> None:
             # Bump on every retrain: the batch upsert only replaces stored
             # predictions when the model version differs, so a reused version
             # leaves rows from the previous artifact in the table.
-            "model_version": "v4.6_logistic",
+            "model_version": "v4.8_logistic",
             "model_type": "logistic_regression",
+            "calibration_method": calibrator.method,
             "accuracy": float(round(final_acc, 4)),
             "brier_score": float(round(final_brier, 4)),
             "accuracy_base_rate": float(round(base_rate, 4)),
@@ -352,6 +389,7 @@ def main() -> None:
                 "weight_xgb": float(best_weight),
                 "accuracy": float(round(best_acc, 4)),
                 "brier": float(round(best_brier, 4)),
+                "logloss": float(round(best_ll, 4)),
                 "selection_window": [
                     str(selection_start.date()),
                     str((report_start - pd.Timedelta(days=1)).date()),

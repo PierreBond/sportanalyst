@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import joblib
 import numpy as np
 import pytest
+from sklearn.metrics import log_loss
 
 from services.model_serving.src.betting import (
     BettingEngine,
@@ -135,7 +137,6 @@ class TestBettingEngine:
 
 
 class TestProbabilityCalibrator:
-    """Tests for ProbabilityCalibrator."""
 
     def test_fit_and_calibrate(self) -> None:
         rng = np.random.RandomState(42)
@@ -162,3 +163,97 @@ class TestProbabilityCalibrator:
                 np.array([[0.5, 0.3, 0.2]]),
                 np.array([0]),
             )
+
+    @staticmethod
+    def _sample_y(rng: np.random.RandomState, probs: np.ndarray) -> np.ndarray:
+        return np.array([rng.choice(3, p=p) for p in probs])
+
+    def test_auto_keeps_identity_when_probabilities_are_calibrated(self) -> None:
+        rng = np.random.RandomState(11)
+        n = 4000
+        # exactly calibrated: the class probabilities are the true ones
+        u = rng.uniform(0.05, 0.95, n)
+        probs = np.column_stack([u, (1.0 - u) / 2.0, (1.0 - u) / 2.0])
+        y_true = self._sample_y(rng, probs)
+
+        calibrator = ProbabilityCalibrator()
+        calibrator.fit(probs, y_true, method="auto")
+
+        assert calibrator.method == "identity"
+        np.testing.assert_allclose(
+            calibrator.calibrate(probs), probs, atol=1e-6
+        )
+
+    def test_auto_rejects_identity_when_probabilities_are_distorted(self) -> None:
+        rng = np.random.RandomState(3)
+        n = 3000
+        u = rng.uniform(0.1, 0.9, n)
+        true_p = np.column_stack([u, 0.9 - u, np.full(n, 0.1)])
+        true_p = true_p / true_p.sum(axis=1, keepdims=True)
+        y_true = self._sample_y(rng, true_p)
+        # overconfident distortion of the true probabilities
+        raw = true_p**3
+        raw = raw / raw.sum(axis=1, keepdims=True)
+
+        calibrator = ProbabilityCalibrator()
+        calibrator.fit(raw[: n // 2], y_true[: n // 2], method="auto")
+        assert calibrator.method != "identity"
+
+        holdout = slice(n // 2, n)
+        identity_ll = log_loss(y_true[holdout], raw[holdout], labels=[0, 1, 2])
+        calibrated_ll = log_loss(
+            y_true[holdout], calibrator.calibrate(raw[holdout]), labels=[0, 1, 2]
+        )
+        assert calibrated_ll < identity_ll
+
+    @pytest.mark.parametrize("method", ["identity", "isotonic", "vector"])
+    def test_explicit_method_is_used(self, method: str) -> None:
+        rng = np.random.RandomState(5)
+        raw = rng.dirichlet([2, 2, 2], 200)
+        y_true = rng.choice(3, 200)
+
+        calibrator = ProbabilityCalibrator()
+        calibrator.fit(raw, y_true, method=method)
+
+        assert calibrator.method == method
+        calibrated = calibrator.calibrate(raw)
+        np.testing.assert_allclose(calibrated.sum(axis=1), 1.0, atol=1e-6)
+
+    def test_save_load_round_trip_keeps_method(self, tmp_path) -> None:
+        rng = np.random.RandomState(5)
+        raw = rng.dirichlet([2, 2, 2], 200)
+        y_true = rng.choice(3, 200)
+
+        calibrator = ProbabilityCalibrator()
+        calibrator.fit(raw, y_true, method="vector")
+        path = tmp_path / "calibrator.json"
+        calibrator.save(path)
+
+        loaded = ProbabilityCalibrator()
+        loaded.load(path)
+
+        assert loaded.method == "vector"
+        assert loaded.is_fitted
+        np.testing.assert_allclose(
+            loaded.calibrate(raw), calibrator.calibrate(raw), atol=1e-6
+        )
+
+    def test_load_legacy_file_defaults_to_isotonic(self, tmp_path) -> None:
+        rng = np.random.RandomState(9)
+        raw = rng.dirichlet([2, 2, 2], 200)
+        y_true = rng.choice(3, 200)
+
+        calibrator = ProbabilityCalibrator()
+        calibrator.fit(raw, y_true, method="isotonic")
+        path = tmp_path / "calibrator.json"
+        calibrator.save(path)
+        # files written before the method was chosen have no "method" key
+        state = joblib.load(path)
+        state.pop("method")
+        joblib.dump(state, path)
+
+        loaded = ProbabilityCalibrator()
+        loaded.load(path)
+
+        assert loaded.method == "isotonic"
+        assert loaded.is_fitted

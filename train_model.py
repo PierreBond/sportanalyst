@@ -4,9 +4,10 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import classification_report, brier_score_loss
 from sklearn.linear_model import PoissonRegressor
+from sklearn.pipeline import Pipeline
 import xgboost as xgb
 import joblib, warnings
 warnings.filterwarnings("ignore")
@@ -323,8 +324,17 @@ def main():
 
     # === Poisson Goals Model ===
     print("\n=== Poisson Goals Model ===")
-    poisson_home = PoissonRegressor(alpha=0.1, max_iter=500)
-    poisson_away = PoissonRegressor(alpha=0.1, max_iter=500)
+    # Standardised: on raw features the fit converges to an intercept-only
+    # model (every coefficient exactly zero), so it predicted the league
+    # average for every fixture.
+    def goal_regressor():
+        return Pipeline([
+            ("scale", StandardScaler()),
+            ("poisson", PoissonRegressor(alpha=0.1, max_iter=500)),
+        ])
+
+    poisson_home = goal_regressor()
+    poisson_away = goal_regressor()
     poisson_home.fit(X_train, df.loc[train_mask, "home_score"])
     poisson_away.fit(X_train, df.loc[train_mask, "away_score"])
     lambda_h = poisson_home.predict(X_test)
