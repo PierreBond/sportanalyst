@@ -5,8 +5,10 @@ import { useParams } from "next/navigation";
 import { SHAPWaterfall } from "@/components/SHAPWaterfall";
 import { DataSourceBadge } from "@/components/DataSourceBadge";
 import { MarketsPanel } from "@/components/MarketsPanel";
+import { Card, CardHeader, ErrorNote, SectionHeader } from "@/components/ui";
 import { getPrediction, getMarkets, getWebSocketUrl } from "@/lib/api";
 import { useWebSocket } from "@/lib/ws";
+import { formatDateTime } from "@/lib/utils";
 import type { PredictionResponse, MarketsResponse } from "@/types";
 
 export default function MatchDetailPage() {
@@ -15,18 +17,15 @@ export default function MatchDetailPage() {
 
   const [prediction, setPrediction] = useState<PredictionResponse | null>(null);
   const [markets, setMarkets] = useState<MarketsResponse | null>(null);
+  const [marketsError, setMarketsError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
   const { connect, disconnect, isConnected } = useWebSocket({
     onMessage: (message) => {
       if (message.type === "prediction_update" && message.probabilities) {
         setPrediction((prev) =>
-          prev
-            ? {
-                ...prev,
-                probabilities: message.probabilities!,
-              }
-            : null
+          prev ? { ...prev, probabilities: message.probabilities! } : null
         );
       }
     },
@@ -38,16 +37,16 @@ export default function MatchDetailPage() {
         const data = await getPrediction(matchId);
         setPrediction(data);
         setError(null);
-      } catch (err) {
-        setError("Failed to load prediction");
-        console.error(err);
+      } catch {
+        setError("Could not load the prediction for this fixture.");
       } finally {
         setLoading(false);
       }
+
       try {
         setMarkets(await getMarkets(matchId));
-      } catch (err) {
-        console.error(err);
+      } catch {
+        setMarketsError(true);
       }
     }
 
@@ -55,198 +54,157 @@ export default function MatchDetailPage() {
   }, [matchId]);
 
   useEffect(() => {
-    const wsUrl = getWebSocketUrl(matchId);
-    connect(wsUrl);
-
-    return () => {
-      disconnect();
-    };
+    connect(getWebSocketUrl(matchId));
+    return () => disconnect();
   }, [matchId, connect, disconnect]);
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/2 mb-6"></div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="h-64 bg-gray-200 rounded-lg"></div>
-            <div className="h-64 bg-gray-200 rounded-lg"></div>
-          </div>
-        </div>
-      </div>
+      <Card className="px-6 py-14 text-center text-[13px] text-ink-soft">
+        Loading the forecast…
+      </Card>
     );
   }
 
   if (error || !prediction) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-red-800 mb-2">
-            Error Loading Prediction
-          </h2>
-          <p className="text-red-600">{error || "Prediction not found"}</p>
-        </div>
-      </div>
+      <ErrorNote>{error || "Prediction not found for this fixture."}</ErrorNote>
     );
   }
 
+  const outcomes = [
+    { label: prediction.home_team, prob: prediction.probabilities.home_win },
+    { label: "Draw", prob: prediction.probabilities.draw },
+    { label: prediction.away_team, prob: prediction.probabilities.away_win },
+  ];
+  const maxProb = Math.max(
+    prediction.probabilities.home_win,
+    prediction.probabilities.draw,
+    prediction.probabilities.away_win
+  );
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">
-              {prediction.home_team} vs {prediction.away_team}
-            </h1>
-            <p className="text-gray-500 mt-1">
-              {prediction.league} • {prediction.model} v{prediction.model_version}
-            </p>
-            <div className="mt-3">
-              <DataSourceBadge
-                label="Mixed"
-                detail="prediction and websocket are live; line movement, sentiment, biometrics feeds are unavailable"
-                tone="mixed"
-              />
-            </div>
-          </div>
-          <div className="flex items-center space-x-2">
-            {isConnected && (
-              <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm flex items-center">
-                <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
+    <div className="animate-rise">
+      <SectionHeader
+        title={`${prediction.home_team} vs ${prediction.away_team}`}
+        description={`${prediction.league.replaceAll("_", " ")} · ${formatDateTime(
+          prediction.scheduled_at
+        )} · ${prediction.model_version}`}
+        actions={
+          <div className="flex items-center gap-2">
+            {isConnected ? (
+              <span className="rounded-md border border-pos/30 bg-pos/[0.08] px-2.5 py-1 text-[11px] text-pos">
                 Live
               </span>
-            )}
-            {prediction.calibrated && (
-              <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
+            ) : null}
+            {prediction.calibrated ? (
+              <span className="rounded-md border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-ink-soft">
                 Calibrated
               </span>
-            )}
+            ) : null}
           </div>
-        </div>
+        }
+      />
+
+      <div className="mb-4">
+        <DataSourceBadge
+          label="Mixed"
+          detail="prediction and websocket are live; sentiment and biometric feeds are unavailable"
+          tone="mixed"
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <div className="lg:col-span-2">
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">
-              Probabilistic Forecast
-            </h2>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-6 bg-gradient-to-b from-blue-50 to-white rounded-lg border-2 border-blue-500">
-                <div className="text-sm text-gray-500 mb-2">
-                  {prediction.home_team} Win
-                </div>
-                <div className="text-5xl font-bold text-blue-600">
-                  {(prediction.probabilities.home_win * 100).toFixed(1)}%
-                </div>
-              </div>
-              <div className="text-center p-6 bg-gradient-to-b from-gray-50 to-white rounded-lg border-2 border-gray-300">
-                <div className="text-sm text-gray-500 mb-2">Draw</div>
-                <div className="text-5xl font-bold text-gray-600">
-                  {(prediction.probabilities.draw * 100).toFixed(1)}%
-                </div>
-              </div>
-              <div className="text-center p-6 bg-gradient-to-b from-red-50 to-white rounded-lg border-2 border-red-500">
-                <div className="text-sm text-gray-500 mb-2">
-                  {prediction.away_team} Win
-                </div>
-                <div className="text-5xl font-bold text-red-600">
-                  {(prediction.probabilities.away_win * 100).toFixed(1)}%
-                </div>
-              </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+        <div className="space-y-4">
+          <Card>
+            <CardHeader title="Forecast" context="home / draw / away" />
+            <div className="grid grid-cols-3 divide-x divide-white/[0.07]">
+              {outcomes.map((outcome) => {
+                const leading = outcome.prob === maxProb;
+                return (
+                  <div
+                    key={outcome.label}
+                    className={leading ? "bg-raised px-5 py-5" : "px-5 py-5"}
+                  >
+                    <p className="truncate text-[11px] text-ink-mute">{outcome.label}</p>
+                    <p className="tnum mt-2 font-mono text-[28px] leading-none text-ink">
+                      {(outcome.prob * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                );
+              })}
             </div>
-
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-3">
-                Predicted Score
-              </h3>
-              <div className="text-4xl font-bold text-center">
-                {prediction.home_team}{" "}
-                <span className="text-blue-600">
-                  {prediction.predicted_score.home}
-                </span>{" "}
-                -{" "}
-                <span className="text-red-600">
-                  {prediction.predicted_score.away}
-                </span>{" "}
-                {prediction.away_team}
-              </div>
-              <p className="text-center text-gray-500 mt-2">
-                Brier Score (held-out): {prediction.brier_score?.toFixed(3) ?? "—"}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] px-5 py-4">
+              <p className="tnum font-mono text-[13px] text-ink-soft">
+                Predicted score {prediction.predicted_score.home.toFixed(1)} -{" "}
+                {prediction.predicted_score.away.toFixed(1)}
+              </p>
+              <p className="tnum font-mono text-[11px] text-ink-mute">
+                Brier {prediction.brier_score?.toFixed(3) ?? "—"}
               </p>
             </div>
-          </div>
+          </Card>
 
-          {markets && (
-            <div className="mt-6">
-              <MarketsPanel markets={markets} />
-            </div>
-          )}
+          {markets ? (
+            <MarketsPanel markets={markets} />
+          ) : marketsError ? (
+            <Card className="px-5 py-6">
+              <h2 className="text-[15px] font-medium text-ink">Goal markets</h2>
+              <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
+                The goal model could not produce expectations for this fixture, so the
+                totals, BTTS and correct-score markets are unavailable here.
+              </p>
+            </Card>
+          ) : null}
+
+          <SHAPWaterfall explanation={prediction.shap_explanation} />
         </div>
 
-        <div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">
-              Team Status
-            </h2>
-            <p className="text-gray-500 text-sm">Sentiment feed unavailable for this match.</p>
-
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Team Biometrics
-              </h3>
-              <p className="text-gray-500 text-sm">Biometric feed unavailable for this match.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <SHAPWaterfall explanation={prediction.shap_explanation} />
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">
-            Strategic Recommendations
-          </h2>
-          {prediction.value_bets && prediction.value_bets.length > 0 ? (
-            <div className="space-y-4">
-              {prediction.value_bets.map((bet, index) => (
-                <div
-                  key={index}
-                  className="p-4 bg-green-50 rounded-lg border-l-4 border-green-500"
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="text-lg font-bold text-green-700">
-                        {bet.selection.toUpperCase()}
-                      </span>
-                      <p className="text-sm text-gray-600 mt-1">
-                        @ {bet.best_odds} from {bet.sportsbook}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-lg font-bold text-green-600">
-                        +{(bet.edge * 100).toFixed(1)}%
+        <div className="space-y-4">
+          <Card>
+            <CardHeader title="Value on this fixture" />
+            <div className="px-5 py-4">
+              {prediction.value_bets && prediction.value_bets.length > 0 ? (
+                <ul className="space-y-3">
+                  {prediction.value_bets.map((bet, index) => (
+                    <li
+                      key={index}
+                      className="rounded-lg border-l-2 border-accent bg-accent/[0.06] px-3 py-2"
+                    >
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-[13px] font-medium text-ink">
+                          {bet.selection.replace("_", " ")}
+                        </span>
+                        <span className="tnum font-mono text-[13px] text-accent">
+                          +{(bet.edge * 100).toFixed(1)}%
+                        </span>
                       </div>
-                      <div className="text-sm text-gray-500">Edge</div>
-                    </div>
-                  </div>
-                  <div className="mt-2 flex justify-between text-sm">
-                    <span>
-                      Kelly: {bet.kelly_stake_pct.toFixed(2)}% of bankroll
-                    </span>
-                    <span>
-                      Implied: {(bet.implied_prob * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-              ))}
+                      <p className="tnum mt-1 font-mono text-[11px] text-ink-soft">
+                        {bet.best_odds.toFixed(2)} at {bet.sportsbook}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[13px] leading-relaxed text-ink-soft">
+                  No price on this fixture clears the edge threshold. Compare it on the
+                  board if the fixture is inside the current slate.
+                </p>
+              )}
             </div>
-          ) : (
-            <p className="text-gray-500 text-center py-8">
-              No value bets detected at current threshold
-            </p>
-          )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Feeds" />
+            <div className="space-y-3 px-5 py-4">
+              <p className="text-[13px] leading-relaxed text-ink-soft">
+                Team sentiment is unavailable for this fixture.
+              </p>
+              <p className="text-[13px] leading-relaxed text-ink-soft">
+                Biometric and injury feeds are not part of the free-data setup.
+              </p>
+            </div>
+          </Card>
         </div>
       </div>
     </div>

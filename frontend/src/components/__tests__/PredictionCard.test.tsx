@@ -75,6 +75,9 @@ describe("PredictionCard", () => {
     render(<PredictionCard prediction={mockPrediction} />);
 
     const homeOutcome = screen.getByText("Home").parentElement;
-    expect(homeOutcome).toHaveClass("bg-blue-600");
+    expect(homeOutcome).toHaveClass("bg-raised");
+
+    const awayOutcome = screen.getByText("Away").parentElement;
+    expect(awayOutcome).not.toHaveClass("bg-raised");
   });
 });

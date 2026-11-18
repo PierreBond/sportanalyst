@@ -33,6 +33,16 @@ export interface ValueBet {
   edge: number;
   kelly_stake_pct: number;
   sportsbook: string;
+  scheduled_at?: string | null;
+  odds_captured_at?: string | null;
+  raw_implied_prob?: number;
+  prices?: { home_win: number; draw: number; away_win: number };
+  model_probs?: { home_win: number; draw: number; away_win: number };
+  fair_probs?: {
+    home_win: number | null;
+    draw: number | null;
+    away_win: number | null;
+  };
 }
 
 export interface SHAPExplanation {
@@ -92,6 +102,7 @@ export interface ModelInfo {
   stage: string;
   accuracy: number;
   brier_score: number;
+  accuracy_base_rate?: number | null;
   trained_at: string;
   n_matches: number;
   n_features: number;

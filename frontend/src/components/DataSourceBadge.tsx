@@ -1,22 +1,28 @@
+import { cn } from "@/lib/utils";
+
 interface DataSourceBadgeProps {
   label: string;
   detail?: string;
   tone?: "live" | "mixed" | "static";
 }
 
-export function DataSourceBadge({ label, detail, tone = "live" }: DataSourceBadgeProps) {
-  const toneClass =
-    tone === "live"
-      ? "bg-green-100 text-green-800 border-green-200"
-      : tone === "mixed"
-      ? "bg-amber-100 text-amber-800 border-amber-200"
-      : "bg-gray-100 text-gray-700 border-gray-200";
+const TONES = {
+  live: "border-pos/30 bg-pos/[0.08] text-pos",
+  mixed: "border-accent/30 bg-accent/[0.08] text-accent",
+  static: "border-white/10 bg-white/[0.03] text-ink-soft",
+};
 
+export function DataSourceBadge({ label, detail, tone = "live" }: DataSourceBadgeProps) {
   return (
-    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs ${toneClass}`}>
-      <span className="font-semibold">Data source:</span>
-      <span>{label}</span>
-      {detail && <span className="opacity-80">({detail})</span>}
+    <div
+      className={cn(
+        "inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2.5 py-1 text-[11px]",
+        TONES[tone]
+      )}
+    >
+      <span className="font-mono uppercase tracking-wide opacity-70">source</span>
+      <span className="font-medium">{label}</span>
+      {detail ? <span className="text-ink-soft">{detail}</span> : null}
     </div>
   );
 }

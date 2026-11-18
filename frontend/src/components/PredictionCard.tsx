@@ -1,122 +1,90 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { PredictionResponse } from "@/types";
+import { cn, formatDateTime } from "@/lib/utils";
 
 interface PredictionCardProps {
   prediction: PredictionResponse;
 }
 
 export function PredictionCard({ prediction }: PredictionCardProps) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6 animate-pulse">
-        <div className="h-4 bg-gray-200 rounded w-1/2 mb-4"></div>
-        <div className="h-8 bg-gray-200 rounded w-full mb-2"></div>
-        <div className="h-8 bg-gray-200 rounded w-3/4"></div>
-      </div>
-    );
-  }
-
   const { probabilities } = prediction;
+
+  const outcomes = [
+    { label: "Home", prob: probabilities.home_win },
+    { label: "Draw", prob: probabilities.draw },
+    { label: "Away", prob: probabilities.away_win },
+  ];
   const maxProb = Math.max(
     probabilities.home_win,
     probabilities.draw,
     probabilities.away_win
   );
 
-  const confidenceColor =
-    maxProb >= 0.55
-      ? "bg-green-100 text-green-700"
-      : maxProb >= 0.50
-        ? "bg-yellow-100 text-yellow-700"
-        : "bg-red-100 text-red-600";
-
-  const getOutcomeClass = (prob: number) => {
-    if (prob === maxProb) {
-      return "bg-blue-600 text-white";
-    }
-    return "bg-gray-100 text-gray-700";
-  };
-
   return (
-    <Link href={`/matches/${prediction.match_id}`}>
-      <div className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow cursor-pointer">
-        <div className="p-4 border-b border-gray-100">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center space-x-2">
-              <span className="font-semibold text-gray-900">
-                {prediction.home_team}
-              </span>
-              <span className="text-gray-400">vs</span>
-              <span className="font-semibold text-gray-900">
-                {prediction.away_team}
-              </span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${confidenceColor}`}>
-                {(maxProb * 100).toFixed(0)}%
-              </span>
-              <span className="text-xs text-gray-500">
-                {prediction.league}
-              </span>
-            </div>
-          </div>
+    <Link
+      href={`/matches/${prediction.match_id}`}
+      className="group block rounded-xl border border-white/[0.07] bg-surface transition-colors duration-200 ease-out hover:border-white/[0.16] hover:bg-raised/40"
+    >
+      <div className="flex items-start justify-between gap-4 px-5 pt-4">
+        <div className="min-w-0">
+          <p className="font-mono text-[11px] uppercase tracking-wide text-ink-mute">
+            {prediction.league.replaceAll("_", " ")}
+          </p>
+          <p className="mt-1.5 text-[15px] font-medium text-ink">
+            <span>{prediction.home_team}</span>
+            <span className="px-1.5 text-ink-mute">vs</span>
+            <span>{prediction.away_team}</span>
+          </p>
         </div>
+        <span className="tnum shrink-0 font-mono text-[11px] text-ink-mute">
+          {formatDateTime(prediction.scheduled_at)}
+        </span>
+      </div>
 
-        <div className="p-4">
-          <div className="grid grid-cols-3 gap-2 mb-3">
+      <div className="mt-4 grid grid-cols-3 gap-1.5 px-5">
+        {outcomes.map((outcome) => {
+          const leading = outcome.prob === maxProb;
+          return (
             <div
-              className={`rounded-lg p-3 text-center transition-all ${getOutcomeClass(
-                probabilities.home_win
-              )}`}
+              key={outcome.label}
+              className={cn(
+                "rounded-lg px-2 py-2.5",
+                leading ? "bg-raised" : "bg-white/[0.02]"
+              )}
             >
-              <div className="text-xs opacity-75 mb-1">Home</div>
-              <div className="text-xl font-bold">
-                {(probabilities.home_win * 100).toFixed(0)}%
-              </div>
-            </div>
-            <div
-              className={`rounded-lg p-3 text-center transition-all ${getOutcomeClass(
-                probabilities.draw
-              )}`}
-            >
-              <div className="text-xs opacity-75 mb-1">Draw</div>
-              <div className="text-xl font-bold">
-                {(probabilities.draw * 100).toFixed(0)}%
-              </div>
-            </div>
-            <div
-              className={`rounded-lg p-3 text-center transition-all ${getOutcomeClass(
-                probabilities.away_win
-              )}`}
-            >
-              <div className="text-xs opacity-75 mb-1">Away</div>
-              <div className="text-xl font-bold">
-                {(probabilities.away_win * 100).toFixed(0)}%
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-between items-center text-xs text-gray-500">
-            <span>
-              Predicted: {prediction.predicted_score.home} -{" "}
-              {prediction.predicted_score.away}
-            </span>
-            {prediction.calibrated && (
-              <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full">
-                Calibrated
+              <span
+                className={cn(
+                  "block text-[11px]",
+                  leading ? "text-ink-soft" : "text-ink-mute"
+                )}
+              >
+                {outcome.label}
               </span>
-            )}
-          </div>
-        </div>
+              <span
+                className={cn(
+                  "tnum mt-1 block font-mono text-[17px] leading-none",
+                  leading ? "text-ink" : "text-ink-soft"
+                )}
+              >
+                {(outcome.prob * 100).toFixed(0)}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between border-t border-white/[0.07] px-5 py-3">
+        <span className="tnum font-mono text-[11px] text-ink-soft">
+          Predicted: {prediction.predicted_score.home} -{" "}
+          {prediction.predicted_score.away}
+        </span>
+        {prediction.calibrated ? (
+          <span className="text-[11px] text-pos">Calibrated</span>
+        ) : (
+          <span className="text-[11px] text-ink-mute">Raw score</span>
+        )}
       </div>
     </Link>
   );

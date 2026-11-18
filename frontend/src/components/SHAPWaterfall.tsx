@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { SHAPExplanation } from "@/types";
 
 interface SHAPWaterfallProps {
@@ -9,130 +8,79 @@ interface SHAPWaterfallProps {
 }
 
 export function SHAPWaterfall({ explanation, maxItems = 5 }: SHAPWaterfallProps) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          Prediction Drivers
-        </h3>
-        <div className="animate-pulse">
-          <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-        </div>
-      </div>
-    );
-  }
-
   const positiveDrivers = explanation.positive_drivers.slice(0, maxItems);
   const negativeDrivers = explanation.negative_drivers.slice(0, maxItems);
 
-  const maxImpact = Math.max(
-    ...positiveDrivers.map((d) => d.impact),
-    ...negativeDrivers.map((d) => Math.abs(d.impact))
-  );
+  const maxImpact =
+    Math.max(
+      ...positiveDrivers.map((d) => d.impact),
+      ...negativeDrivers.map((d) => Math.abs(d.impact))
+    ) || 1;
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">
-        Prediction Drivers (SHAP)
-      </h3>
+    <section className="rounded-xl border border-white/[0.07] bg-surface">
+      <div className="border-b border-white/[0.07] px-5 py-4">
+        <h2 className="text-[15px] font-medium text-ink">Prediction Drivers (SHAP)</h2>
+      </div>
 
-      {positiveDrivers.length > 0 && (
-        <div className="mb-6">
-          <h4 className="text-sm font-medium text-green-600 mb-3 flex items-center">
-            <svg
-              className="w-4 h-4 mr-1"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 10l7-7m0 0l7 7m-7-7v18"
-              />
-            </svg>
-            Positive Factors
-          </h4>
-          <div className="space-y-2">
-            {positiveDrivers.map((driver, index) => (
-              <div key={index} className="relative">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-sm text-gray-700 truncate pr-2">
-                    {driver.label}
-                  </span>
-                  <span className="text-sm font-semibold text-green-600 whitespace-nowrap">
-                    +{(driver.impact * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-100 rounded-full h-2">
-                  <div
-                    className="bg-green-500 h-2 rounded-full transition-all duration-500"
-                    style={{
-                      width: `${(driver.impact / maxImpact) * 100}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+      <div className="space-y-6 px-5 py-5">
+        {positiveDrivers.length > 0 ? (
+          <div>
+            <h3 className="text-[13px] font-medium text-pos">Positive Factors</h3>
+            <ul className="mt-3 space-y-3">
+              {positiveDrivers.map((driver, index) => (
+                <li key={`${driver.feature}-${index}`}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="truncate text-[13px] text-ink-soft">{driver.label}</span>
+                    <span className="tnum shrink-0 font-mono text-[13px] text-pos">
+                      +{(driver.impact * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.05]">
+                    <div
+                      className="h-full rounded-full bg-pos/70"
+                      style={{ width: `${(driver.impact / maxImpact) * 100}%` }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
-        </div>
-      )}
+        ) : null}
 
-      {negativeDrivers.length > 0 && (
-        <div>
-          <h4 className="text-sm font-medium text-red-600 mb-3 flex items-center">
-            <svg
-              className="w-4 h-4 mr-1"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 14l-7 7m0 0l-7-7m7 7V3"
-              />
-            </svg>
-            Negative Factors
-          </h4>
-          <div className="space-y-2">
-            {negativeDrivers.map((driver, index) => (
-              <div key={index} className="relative">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-sm text-gray-700 truncate pr-2">
-                    {driver.label}
-                  </span>
-                  <span className="text-sm font-semibold text-red-600 whitespace-nowrap">
-                    {(driver.impact * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div className="w-full bg-gray-100 rounded-full h-2">
-                  <div
-                    className="bg-red-500 h-2 rounded-full transition-all duration-500"
-                    style={{
-                      width: `${(Math.abs(driver.impact) / maxImpact) * 100}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+        {negativeDrivers.length > 0 ? (
+          <div>
+            <h3 className="text-[13px] font-medium text-neg">Negative Factors</h3>
+            <ul className="mt-3 space-y-3">
+              {negativeDrivers.map((driver, index) => (
+                <li key={`${driver.feature}-${index}`}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="truncate text-[13px] text-ink-soft">{driver.label}</span>
+                    <span className="tnum shrink-0 font-mono text-[13px] text-neg">
+                      {(driver.impact * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.05]">
+                    <div
+                      className="h-full rounded-full bg-neg/70"
+                      style={{
+                        width: `${(Math.abs(driver.impact) / maxImpact) * 100}%`,
+                      }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
-        </div>
-      )}
+        ) : null}
 
-      {positiveDrivers.length === 0 && negativeDrivers.length === 0 && (
-        <p className="text-gray-500 text-sm">No drivers available</p>
-      )}
-    </div>
+        {positiveDrivers.length === 0 && negativeDrivers.length === 0 ? (
+          <p className="text-[13px] leading-relaxed text-ink-soft">
+            No driver explanation available for this fixture. The current model is a
+            linear scorer, so it does not publish per-feature attributions.
+          </p>
+        ) : null}
+      </div>
+    </section>
   );
 }
