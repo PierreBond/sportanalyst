@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -21,7 +22,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +46,7 @@ try:
     from .cache import PredictionCache
     from .calibrator import ProbabilityCalibrator
     from .explainer import PredictionExplainer
+    from .pdf import render_match_report_pdf
     from .predictor import ModelPredictor
 except ImportError:
     from betting import (
@@ -59,6 +61,7 @@ except ImportError:
     from cache import PredictionCache
     from calibrator import ProbabilityCalibrator
     from explainer import PredictionExplainer
+    from pdf import render_match_report_pdf
     from predictor import ModelPredictor
 
 setup_logging("model-serving")
@@ -490,9 +493,20 @@ def _poisson_1x2(lam_h: float, lam_a: float) -> tuple[float, float, float]:
     )
 
 
-def _blend_with_poisson(raw_probs, features: dict) -> tuple[float, float, float] | None:
-    """Blend XGBoost with the Poisson goal model; None when disabled/fails."""
-    if _blend_weight >= 1.0 or not _poisson or not _meta_feature_names:
+def _model_metadata() -> dict[str, Any]:
+    """Read the model metadata file (version, held-out metrics)."""
+    meta_path = _metadata_path()
+    if not meta_path.exists():
+        return {}
+    try:
+        return json.loads(meta_path.read_text())
+    except Exception:
+        return {}
+
+
+def _goal_expectations(features: dict[str, float]) -> tuple[float, float] | None:
+    """Expected goals per side from the Poisson goal model, None when unavailable."""
+    if not _poisson:
         return None
     try:
         import pandas as pd
@@ -500,14 +514,24 @@ def _blend_with_poisson(raw_probs, features: dict) -> tuple[float, float, float]
         frame = pd.DataFrame([{n: features.get(n, 0.0) for n in _meta_feature_names}])
         lam_h = float(np.clip(_poisson["home"].predict(frame)[0], 0.05, 6.0))
         lam_a = float(np.clip(_poisson["away"].predict(frame)[0], 0.05, 6.0))
-        pois = _poisson_1x2(lam_h, lam_a)
-        return tuple(
-            _blend_weight * x + (1.0 - _blend_weight) * p
-            for x, p in zip(raw_probs, pois)
-        )
+        return lam_h, lam_a
     except Exception as e:
-        logger.warning("prediction_blend_failed", error=str(e))
+        logger.warning("goal_expectations_failed", error=str(e))
         return None
+
+
+def _blend_with_poisson(raw_probs, features: dict) -> tuple[float, float, float] | None:
+    """Blend XGBoost with the Poisson goal model; None when disabled/fails."""
+    if _blend_weight >= 1.0 or not _meta_feature_names:
+        return None
+    goals = _goal_expectations(features)
+    if goals is None:
+        return None
+    pois = _poisson_1x2(*goals)
+    return tuple(
+        _blend_weight * x + (1.0 - _blend_weight) * p
+        for x, p in zip(raw_probs, pois)
+    )
 
 
 @app.get("/api/v1/markets/{match_id}")
@@ -525,15 +549,11 @@ async def get_markets(
         raise HTTPException(status_code=503, detail="Poisson goal models not loaded")
 
     features = await _build_features_for_match(match_id, db)
-    try:
-        import pandas as pd
-
-        frame = pd.DataFrame([{n: features.get(n, 0.0) for n in _meta_feature_names}])
-        lam_h = float(np.clip(_poisson["home"].predict(frame)[0], 0.05, 6.0))
-        lam_a = float(np.clip(_poisson["away"].predict(frame)[0], 0.05, 6.0))
-    except Exception as e:
-        logger.warning("markets_calculation_failed", match_id=match_id, error=str(e))
+    goals = _goal_expectations(features)
+    if goals is None:
+        logger.warning("markets_calculation_failed", match_id=match_id)
         raise HTTPException(status_code=500, detail="Failed to compute goal expectations")
+    lam_h, lam_a = goals
 
     m = _poisson_matrix(lam_h, lam_a)
     total = lam_h + lam_a
@@ -1357,14 +1377,38 @@ async def get_report(
 
 
 @app.get("/api/v1/reports/{match_id}/pdf")
-async def get_report_pdf(match_id: str) -> dict[str, Any]:
-    """Generate a PDF version of the match report."""
+async def get_report_pdf(
+    match_id: str,
+    db: AsyncSession | None = Depends(get_optional_db),
+) -> Response:
+    """Render the match research report as a PDF."""
 
-    return {
-        "match_id": match_id,
-        "pdf_url": f"/api/v1/reports/{match_id}/download",
-        "message": "PDF generation not implemented - use reporting service",
-    }
+    prediction = await _generate_prediction(match_id, db=db)
+
+    xg = None
+    try:
+        features = await _build_features_for_match(match_id, db)
+        goals = _goal_expectations(features)
+        if goals:
+            xg = {
+                "home": round(goals[0], 3),
+                "away": round(goals[1], 3),
+                "total": round(goals[0] + goals[1], 3),
+            }
+    except Exception as e:
+        logger.warning("report_pdf_xg_failed", match_id=match_id, error=str(e))
+
+    pdf = render_match_report_pdf(prediction, _model_metadata(), xg)
+    # match_id is attacker-controlled path input; keep it to a safe filename so
+    # it cannot break the Content-Disposition header.
+    safe_id = re.sub(r"[^A-Za-z0-9._-]", "_", match_id)[:80] or "match"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="match-report-{safe_id}.pdf"',
+        },
+    )
 
 
 # Settlement benchmark: model vs market (vig-normalized implied odds) vs actual

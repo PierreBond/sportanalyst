@@ -61,8 +61,12 @@ export default function ReportsPage() {
       anchor.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(anchor);
-    } catch {
-      setError("The PDF could not be downloaded.");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `The PDF could not be downloaded: ${err.message}`
+          : "The PDF could not be downloaded."
+      );
     } finally {
       setDownloading(null);
     }

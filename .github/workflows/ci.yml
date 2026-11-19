@@ -49,7 +49,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install uv
-          uv pip install --system pytest pytest-cov pytest-asyncio httpx numpy pandas pyyaml redis scikit-learn fastapi structlog sqlalchemy asyncpg pydantic pydantic-settings kafka-python xgboost shap joblib
+          uv pip install --system pytest pytest-cov pytest-asyncio httpx numpy pandas pyyaml redis scikit-learn fastapi structlog sqlalchemy asyncpg pydantic pydantic-settings kafka-python xgboost shap joblib reportlab
           cd libs && uv pip install --system -e ".[dev]" && cd ..
 
       - name: Run backend tests

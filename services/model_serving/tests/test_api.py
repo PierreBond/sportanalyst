@@ -170,8 +170,22 @@ async def test_get_report_pdf(client):
     match_id = "test-match-123"
     response = await client.get(f"/api/v1/reports/{match_id}/pdf")
     assert response.status_code == 200
-    data = response.json()
-    assert "pdf_url" in data
+    assert response.headers["content-type"].startswith("application/pdf")
+    body = response.content
+    assert body.startswith(b"%PDF-")
+    assert body.rstrip().endswith(b"%%EOF")
+    assert "attachment" in response.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_get_report_pdf_sanitizes_filename(client):
+    """A hostile match_id must not break the Content-Disposition header."""
+    response = await client.get("/api/v1/reports/a%22b%0d%0ac/pdf")
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert '"' not in disposition.removeprefix('attachment; filename="').rstrip('"')
+    assert "\r" not in disposition
+    assert "\n" not in disposition
 
 
 @pytest.mark.asyncio

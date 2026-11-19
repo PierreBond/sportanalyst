@@ -82,6 +82,12 @@ export async function getReportPDF(matchId: string): Promise<Blob> {
   if (!response.ok) {
     throw new Error(`API Error: ${response.status}`);
   }
+  // Guard: the backend used to answer with JSON, which Chrome saved as a
+  // broken .pdf. Only hand back a blob that is really a PDF.
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/pdf")) {
+    throw new Error(`Expected a PDF but the backend returned ${contentType || "no content type"}.`);
+  }
   return response.blob();
 }
 

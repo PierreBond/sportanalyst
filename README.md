@@ -11,6 +11,8 @@ Compose.
 - Compares the served model against bookmaker prices with the margin removed
   (`/value-bets` board), so every number on screen can be checked
 - Serves predictions via a FastAPI backend + Next.js dashboard
+- Exports a one-page PDF match report (`/reports`) with the model's own numbers
+  only — no prices, and a footer saying the model is not an edge signal
 
 ## Model
 
